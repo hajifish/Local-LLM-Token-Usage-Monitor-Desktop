@@ -13,8 +13,20 @@ permissions:
   contents: read
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            target: aarch64-apple-darwin
+            bundle-path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          - os: windows-latest
+            arch: x64
+            target: x86_64-pc-windows-msvc
+            bundle-path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout repository
@@ -29,7 +41,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable (pinned 2026-09-03)
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -39,12 +51,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target aarch64-apple-darwin
+          args: --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: tauri-macos-arm64
+          name: tauri-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            ${{ matrix.bundle-path }}
           if-no-files-found: warn
