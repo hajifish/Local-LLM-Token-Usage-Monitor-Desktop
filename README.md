@@ -4,6 +4,10 @@
 
 ![License](https://img.shields.io/github/license/hajifish/Local-LLM-Token-Usage-Monitor-Desktop)
 
+## 功能预览
+
+![功能预览](assets/screenshot-main.png)
+
 ## 功能特性
 
 - **多服务商支持** — 同时监控多个 LLM 平台的使用情况：

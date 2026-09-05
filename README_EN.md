@@ -4,6 +4,10 @@ A lightweight desktop application for monitoring token usage and balances across
 
 ![License](https://img.shields.io/github/license/hajifish/Local-LLM-Token-Usage-Monitor-Desktop)
 
+## Preview
+
+![Preview](assets/screenshot-main.png)
+
 ## Features
 
 - **Multi-Provider Support** — Monitor usage across multiple LLM platforms:
