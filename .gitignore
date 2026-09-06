@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Tauri / Rust
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Tauri optional capabilities (auto-generated)
+src-tauri/gen/
+
+# TypeScript
+*.tsbuildinfo
+
+# Secrets / Keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+src-tauri/*.key
