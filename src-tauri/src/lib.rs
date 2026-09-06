@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
-use commands::{get_config, get_config_health, get_usage, save_config};
+use commands::{get_config, get_config_health, get_usage, save_config, trigger_refresh};
 use models::UsageSummary;
 use scheduler::Scheduler;
 use tauri_plugin_log::{Target, TargetKind};
@@ -66,7 +66,8 @@ pub fn run() {
             get_usage,
             get_config,
             get_config_health,
-            save_config
+            save_config,
+            trigger_refresh
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
