@@ -13,12 +13,14 @@ use std::path::PathBuf;
 /// 注意：Kimi Code (api.kimi.com) 与 Kimi 开放平台 (api.moonshot.cn) 是两套独立系统。
 pub struct KimiCodeProvider {
     client: Client,
+    cached_response: tokio::sync::OnceCell<KimiSubscriptionStats>,
 }
 
 impl KimiCodeProvider {
     pub fn new() -> Self {
         Self {
             client: http_client(),
+            cached_response: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -35,9 +37,7 @@ impl KimiCodeProvider {
         let path = Self::config_path()?;
         let content = std::fs::read_to_string(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                ProviderError(
-                    "未找到 Kimi Code 配置，请先安装并登录 Kimi Code CLI".to_string(),
-                )
+                ProviderError("未找到 Kimi Code 配置，请先安装并登录 Kimi Code CLI".to_string())
             } else {
                 ProviderError(format!("读取 Kimi Code 配置文件失败: {}", e))
             }
@@ -63,9 +63,8 @@ impl KimiCodeProvider {
     }
 
     fn config_path() -> Result<PathBuf, ProviderError> {
-        let home = dirs::home_dir().ok_or_else(|| {
-            ProviderError("无法获取用户主目录".to_string())
-        })?;
+        let home =
+            dirs::home_dir().ok_or_else(|| ProviderError("无法获取用户主目录".to_string()))?;
         Ok(home.join(".kimi-code").join("config.toml"))
     }
 }
@@ -77,8 +76,7 @@ impl LlmProvider for KimiCodeProvider {
     }
 
     async fn fetch_balance(&self) -> Result<BalanceData, ProviderError> {
-        let api_key = Self::read_api_key()?;
-        let stats = self.fetch_subscription_stats(&api_key).await?;
+        let stats = self.fetch_subscription_stats().await?;
 
         // 主窗口：优先 5h，回退到 7d，再回退到订阅余额
         let remaining = stats
@@ -112,8 +110,7 @@ impl LlmProvider for KimiCodeProvider {
     }
 
     async fn fetch_quota_infos(&self) -> Result<Option<Vec<QuotaInfo>>, ProviderError> {
-        let api_key = Self::read_api_key()?;
-        let stats = self.fetch_subscription_stats(&api_key).await?;
+        let stats = self.fetch_subscription_stats().await?;
 
         let mut quotas = Vec::new();
 
@@ -173,10 +170,12 @@ impl LlmProvider for KimiCodeProvider {
 }
 
 impl KimiCodeProvider {
-    async fn fetch_subscription_stats(
-        &self,
-        api_key: &str,
-    ) -> Result<KimiSubscriptionStats, ProviderError> {
+    /// 通过 OnceCell 缓存只发一次请求，同一轮调度内 fetch_balance 与 fetch_quota_infos 共享结果。
+    async fn fetch_subscription_stats(&self) -> Result<KimiSubscriptionStats, ProviderError> {
+        if let Some(cached) = self.cached_response.get() {
+            return Ok(cached.clone());
+        }
+        let api_key = Self::read_api_key()?;
         // 尝试通过 Kimi Code API 获取订阅统计
         // 使用 connect-RPC 风格的 POST 请求
         let resp = self
@@ -204,11 +203,14 @@ impl KimiCodeProvider {
             )));
         }
 
-        let wrapper: KimiStatsWrapper = resp.json().await.map_err(|e| {
-            ProviderError(format!("Kimi Code API 响应解析失败: {}", e))
-        })?;
+        let wrapper: KimiStatsWrapper = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError(format!("Kimi Code API 响应解析失败: {}", e)))?;
 
-        Ok(wrapper.data.unwrap_or_default())
+        let stats = wrapper.data.unwrap_or_default();
+        let _ = self.cached_response.set(stats.clone());
+        Ok(stats)
     }
 }
 
@@ -240,7 +242,7 @@ struct KimiStatsWrapper {
     data: Option<KimiSubscriptionStats>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Clone, Deserialize, Default)]
 struct KimiSubscriptionStats {
     #[serde(rename = "ratelimitCode5h")]
     ratelimit_code_5h: Option<KimiRateLimit>,
@@ -250,7 +252,7 @@ struct KimiSubscriptionStats {
     subscription_balance: Option<KimiSubscriptionBalance>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct KimiRateLimit {
     /// 使用比例，0~1 的小数（如 0.0002 表示 0.02%）
     ratio: f64,
@@ -259,7 +261,7 @@ struct KimiRateLimit {
     reset_time: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct KimiSubscriptionBalance {
     #[serde(rename = "amountUsedRatio")]
     amount_used_ratio: f64,
@@ -268,4 +270,115 @@ struct KimiSubscriptionBalance {
     kimi_code_used_ratio: Option<f64>,
     #[serde(rename = "expireTime")]
     expire_time: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- KimiSubscriptionStats 反序列化测试 ---
+
+    #[test]
+    fn test_kimi_subscription_stats_with_ratelimit() {
+        let json = serde_json::json!({
+            "ratelimitCode5h": {
+                "ratio": 0.25,
+                "enabled": true,
+                "resetTime": "2025-09-06T18:00:00Z"
+            },
+            "ratelimitCode7d": {
+                "ratio": 0.40,
+                "enabled": true,
+                "resetTime": "2025-09-12T00:00:00Z"
+            }
+        });
+        let stats: KimiSubscriptionStats = serde_json::from_value(json).unwrap();
+        let r5h = stats.ratelimit_code_5h.unwrap();
+        assert!((r5h.ratio - 0.25).abs() < f64::EPSILON);
+        assert!(r5h.enabled);
+        assert_eq!(r5h.reset_time.as_deref(), Some("2025-09-06T18:00:00Z"));
+        let r7d = stats.ratelimit_code_7d.unwrap();
+        assert!((r7d.ratio - 0.40).abs() < f64::EPSILON);
+        assert!(stats.subscription_balance.is_none());
+    }
+
+    #[test]
+    fn test_kimi_subscription_stats_with_balance() {
+        let json = serde_json::json!({
+            "subscriptionBalance": {
+                "amountUsedRatio": 0.55,
+                "kimiCodeUsedRatio": 0.30,
+                "expireTime": "2025-12-31T23:59:59Z"
+            }
+        });
+        let stats: KimiSubscriptionStats = serde_json::from_value(json).unwrap();
+        assert!(stats.ratelimit_code_5h.is_none());
+        assert!(stats.ratelimit_code_7d.is_none());
+        let sb = stats.subscription_balance.unwrap();
+        assert!((sb.amount_used_ratio - 0.55).abs() < f64::EPSILON);
+        assert_eq!(sb.kimi_code_used_ratio, Some(0.30));
+        assert_eq!(sb.expire_time.as_deref(), Some("2025-12-31T23:59:59Z"));
+    }
+
+    #[test]
+    fn test_kimi_subscription_stats_default() {
+        let json = serde_json::json!({});
+        let stats: KimiSubscriptionStats = serde_json::from_value(json).unwrap();
+        assert!(stats.ratelimit_code_5h.is_none());
+        assert!(stats.ratelimit_code_7d.is_none());
+        assert!(stats.subscription_balance.is_none());
+    }
+
+    // --- KimiStatsWrapper 反序列化测试 ---
+
+    #[test]
+    fn test_kimi_stats_wrapper_with_data() {
+        let json = serde_json::json!({
+            "data": {
+                "ratelimitCode5h": {
+                    "ratio": 0.10,
+                    "enabled": true,
+                    "resetTime": null
+                }
+            }
+        });
+        let wrapper: KimiStatsWrapper = serde_json::from_value(json).unwrap();
+        let data = wrapper.data.unwrap();
+        let r5h = data.ratelimit_code_5h.unwrap();
+        assert!((r5h.ratio - 0.10).abs() < f64::EPSILON);
+        assert!(r5h.reset_time.is_none());
+    }
+
+    #[test]
+    fn test_kimi_stats_wrapper_null_data() {
+        let json = serde_json::json!({
+            "data": null
+        });
+        let wrapper: KimiStatsWrapper = serde_json::from_value(json).unwrap();
+        assert!(wrapper.data.is_none());
+    }
+
+    // --- format_iso_reset 测试 ---
+
+    #[test]
+    fn test_format_iso_reset_future_days() {
+        use chrono::Utc;
+        let future = (Utc::now() + chrono::Duration::days(5)).to_rfc3339();
+        let result = format_iso_reset(&future);
+        assert!(result.contains("天后重置"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_format_iso_reset_future_minutes() {
+        use chrono::Utc;
+        let future = (Utc::now() + chrono::Duration::minutes(45)).to_rfc3339();
+        let result = format_iso_reset(&future);
+        assert!(result.contains("分钟后重置"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_format_iso_reset_invalid() {
+        let result = format_iso_reset("invalid-date");
+        assert_eq!(result, "invalid-date");
+    }
 }

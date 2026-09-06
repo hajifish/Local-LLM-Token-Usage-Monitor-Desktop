@@ -33,9 +33,7 @@ pub async fn get_config_health(
 
 /// 通知调度器立即执行一次供应商轮询，用于前端刷新按钮。
 #[tauri::command]
-pub async fn trigger_refresh(
-    notify: tauri::State<'_, Arc<Notify>>,
-) -> Result<(), String> {
+pub async fn trigger_refresh(notify: tauri::State<'_, Arc<Notify>>) -> Result<(), String> {
     notify.notify_one();
     Ok(())
 }

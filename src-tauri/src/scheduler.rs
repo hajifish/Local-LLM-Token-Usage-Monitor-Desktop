@@ -88,7 +88,10 @@ async fn poll_providers(
             .unwrap_or_else(|| provider_cfg.name.clone());
 
         // Codex / Claude Code / Kimi Code 无需 API Key（凭证从 CLI 配置文件读取），跳过空 key 检查
-        let needs_api_key = !matches!(provider_cfg.name.as_str(), "Codex" | "Claude Code" | "Kimi Code");
+        let needs_api_key = !matches!(
+            provider_cfg.name.as_str(),
+            "Codex" | "Claude Code" | "Kimi Code"
+        );
         if !provider_cfg.enabled || (needs_api_key && provider_cfg.api_key.is_empty()) {
             provider_statuses.push(ProviderStatus {
                 name: provider_cfg.name.clone(),
@@ -206,9 +209,13 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         let mut critical_ok = true;
 
         // 0) 打开主页面（顶部第一项）
-        let Ok(open_item) =
-            MenuItem::with_id(app_handle, "open-main-window", "打开主页面", true, None::<&str>)
-        else {
+        let Ok(open_item) = MenuItem::with_id(
+            app_handle,
+            "open-main-window",
+            "打开主页面",
+            true,
+            None::<&str>,
+        ) else {
             return;
         };
         critical_ok &= menu.append(&open_item).is_ok();

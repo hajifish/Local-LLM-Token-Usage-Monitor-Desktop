@@ -241,7 +241,11 @@ function Settings({ onBack }: SettingsProps) {
             )}
             <br />
             <span>当前页面展示的是默认空配置（并非你的密钥已丢失）。</span>
-            <button style={BANNER_CLOSE} onClick={() => dismiss('unreadable')} aria-label="关闭提示">
+            <button
+              style={BANNER_CLOSE}
+              onClick={() => dismiss('unreadable')}
+              aria-label="关闭提示"
+            >
               ×
             </button>
           </div>
@@ -300,7 +304,10 @@ function Settings({ onBack }: SettingsProps) {
           {config.providers.map((p, i) => (
             <div key={`${p.name}-${p.alias || i}`} className="provider-config">
               <div className="provider-config-header">
-                <select value={p.name} onChange={(e) => handleProviderNameChange(i, e.target.value)}>
+                <select
+                  value={p.name}
+                  onChange={(e) => handleProviderNameChange(i, e.target.value)}
+                >
                   {PROVIDER_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
@@ -317,11 +324,20 @@ function Settings({ onBack }: SettingsProps) {
                 {deletingIndex === i ? (
                   <>
                     <span className="delete-confirm-text">确定?</span>
-                    <button className="remove-btn remove-btn-confirm" onClick={() => removeProvider(i)}>确定</button>
-                    <button className="cancel-btn" onClick={() => setDeletingIndex(null)}>取消</button>
+                    <button
+                      className="remove-btn remove-btn-confirm"
+                      onClick={() => removeProvider(i)}
+                    >
+                      确定
+                    </button>
+                    <button className="cancel-btn" onClick={() => setDeletingIndex(null)}>
+                      取消
+                    </button>
                   </>
                 ) : (
-                  <button className="remove-btn" onClick={() => setDeletingIndex(i)}>删除</button>
+                  <button className="remove-btn" onClick={() => setDeletingIndex(i)}>
+                    删除
+                  </button>
                 )}
               </div>
               <div className="provider-fields">

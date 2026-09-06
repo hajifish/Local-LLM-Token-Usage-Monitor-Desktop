@@ -25,12 +25,26 @@ export function useUsage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
+      // 先注册一次性事件监听，确保不遗漏后端发出的 usage-updated
+      const eventPromise = new Promise<UsageSummary>((resolve) => {
+        listen<UsageSummary>('usage-updated', (event) => {
+          resolve(event.payload);
+        });
+      });
+
       // 通知后端立即轮询供应商
       await invoke('trigger_refresh');
-      // 等待轮询完成（后端完成后会 emit usage-updated 事件，
-      // 但 get_usage 读取的是同一份共享状态，稍等即可拿到新数据）
-      await new Promise((r) => setTimeout(r, 1500));
-      await fetchUsage();
+
+      // 等待 usage-updated 事件（10 秒超时兜底）
+      const timeout = new Promise<UsageSummary | null>((resolve) =>
+        setTimeout(() => resolve(null), 10000),
+      );
+
+      const result = await Promise.race([eventPromise, timeout]);
+      if (result) {
+        setSummary(result);
+      }
+      await fetchUsage(); // 最终确认
     } catch {
       await fetchUsage();
     }

@@ -11,12 +11,14 @@ use std::path::PathBuf;
 /// 与 OpenAI 组织成本 API（需管理员密钥）完全独立，适用于 Plus/Pro/Team 订阅用户。
 pub struct CodexProvider {
     client: Client,
+    cached_response: tokio::sync::OnceCell<CodexUsageResponse>,
 }
 
 impl CodexProvider {
     pub fn new() -> Self {
         Self {
             client: http_client(),
+            cached_response: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -31,9 +33,8 @@ impl CodexProvider {
             }
         })?;
 
-        let creds: CodexAuthFile = serde_json::from_str(&content).map_err(|e| {
-            ProviderError(format!("Codex CLI 凭证格式错误: {}", e))
-        })?;
+        let creds: CodexAuthFile = serde_json::from_str(&content)
+            .map_err(|e| ProviderError(format!("Codex CLI 凭证格式错误: {}", e)))?;
 
         // 支持两种格式：OAuth tokens 或 API Key
         if let Some(tokens) = creds.tokens {
@@ -60,9 +61,8 @@ impl CodexProvider {
     }
 
     fn credentials_path() -> Result<PathBuf, ProviderError> {
-        let home = dirs::home_dir().ok_or_else(|| {
-            ProviderError("无法获取用户主目录".to_string())
-        })?;
+        let home =
+            dirs::home_dir().ok_or_else(|| ProviderError("无法获取用户主目录".to_string()))?;
         Ok(home.join(".codex").join("auth.json"))
     }
 }
@@ -74,8 +74,7 @@ impl LlmProvider for CodexProvider {
     }
 
     async fn fetch_balance(&self) -> Result<BalanceData, ProviderError> {
-        let creds = Self::read_credentials()?;
-        let usage = self.fetch_usage_response(&creds).await?;
+        let usage = self.fetch_usage_response().await?;
 
         // 主窗口：优先 primary_window (5小时)，回退到 secondary_window (7天)
         let remaining = usage
@@ -103,8 +102,7 @@ impl LlmProvider for CodexProvider {
     }
 
     async fn fetch_quota_infos(&self) -> Result<Option<Vec<QuotaInfo>>, ProviderError> {
-        let creds = Self::read_credentials()?;
-        let usage = self.fetch_usage_response(&creds).await?;
+        let usage = self.fetch_usage_response().await?;
 
         let mut quotas = Vec::new();
         let plan_label = usage.plan_type.clone();
@@ -145,10 +143,12 @@ impl LlmProvider for CodexProvider {
 }
 
 impl CodexProvider {
-    async fn fetch_usage_response(
-        &self,
-        creds: &CodexCredentials,
-    ) -> Result<CodexUsageResponse, ProviderError> {
+    /// 通过 OnceCell 缓存只发一次请求，同一轮调度内 fetch_balance 与 fetch_quota_infos 共享结果。
+    async fn fetch_usage_response(&self) -> Result<CodexUsageResponse, ProviderError> {
+        if let Some(cached) = self.cached_response.get() {
+            return Ok(cached.clone());
+        }
+        let creds = Self::read_credentials()?;
         let mut request = self
             .client
             .get("https://chatgpt.com/backend-api/wham/usage")
@@ -159,9 +159,10 @@ impl CodexProvider {
             request = request.header("ChatGPT-Account-Id", account_id);
         }
 
-        let resp = request.send().await.map_err(|e| {
-            ProviderError(format!("Codex API 请求失败: {}", e))
-        })?;
+        let resp = request
+            .send()
+            .await
+            .map_err(|e| ProviderError(format!("Codex API 请求失败: {}", e)))?;
 
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -173,9 +174,12 @@ impl CodexProvider {
             return Err(ProviderError(format!("Codex API error: {}", status)));
         }
 
-        resp.json().await.map_err(|e| {
-            ProviderError(format!("Codex API 响应解析失败: {}", e))
-        })
+        let resp: CodexUsageResponse = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError(format!("Codex API 响应解析失败: {}", e)))?;
+        let _ = self.cached_response.set(resp.clone());
+        Ok(resp)
     }
 }
 
@@ -222,7 +226,7 @@ struct CodexCredentials {
     account_id: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct CodexUsageResponse {
     #[serde(rename = "plan_type")]
     plan_type: Option<String>,
@@ -230,7 +234,7 @@ struct CodexUsageResponse {
     rate_limit: Option<CodexRateLimit>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct CodexRateLimit {
     #[serde(rename = "primary_window")]
     primary_window: Option<CodexWindow>,
@@ -238,10 +242,134 @@ struct CodexRateLimit {
     secondary_window: Option<CodexWindow>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct CodexWindow {
     #[serde(rename = "used_percent")]
     used_percent: i32,
     #[serde(rename = "reset_at")]
     reset_at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- CodexUsageResponse 反序列化测试 ---
+
+    #[test]
+    fn test_codex_usage_response_with_primary_window() {
+        let json = serde_json::json!({
+            "plan_type": "Plus",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 42,
+                    "reset_at": 1700000000
+                },
+                "secondary_window": {
+                    "used_percent": 10,
+                    "reset_at": 1700500000
+                }
+            }
+        });
+        let resp: CodexUsageResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.plan_type.as_deref(), Some("Plus"));
+        let rl = resp.rate_limit.unwrap();
+        let pw = rl.primary_window.unwrap();
+        assert_eq!(pw.used_percent, 42);
+        assert_eq!(pw.reset_at, 1700000000);
+        let sw = rl.secondary_window.unwrap();
+        assert_eq!(sw.used_percent, 10);
+    }
+
+    #[test]
+    fn test_codex_usage_response_with_secondary_only() {
+        let json = serde_json::json!({
+            "plan_type": "Team",
+            "rate_limit": {
+                "secondary_window": {
+                    "used_percent": 55,
+                    "reset_at": 1700600000
+                }
+            }
+        });
+        let resp: CodexUsageResponse = serde_json::from_value(json).unwrap();
+        let rl = resp.rate_limit.unwrap();
+        assert!(rl.primary_window.is_none());
+        let sw = rl.secondary_window.unwrap();
+        assert_eq!(sw.used_percent, 55);
+    }
+
+    #[test]
+    fn test_codex_usage_response_empty() {
+        let json = serde_json::json!({});
+        let resp: CodexUsageResponse = serde_json::from_value(json).unwrap();
+        assert!(resp.plan_type.is_none());
+        assert!(resp.rate_limit.is_none());
+    }
+
+    // --- CodexAuthFile 反序列化测试 ---
+
+    #[test]
+    fn test_codex_auth_file_oauth_tokens() {
+        let json = serde_json::json!({
+            "tokens": {
+                "access_token": "tok_abc123",
+                "account_id": "acct_xyz"
+            }
+        });
+        let auth: CodexAuthFile = serde_json::from_value(json).unwrap();
+        let tokens = auth.tokens.unwrap();
+        assert_eq!(tokens.access_token, "tok_abc123");
+        assert_eq!(tokens.account_id.as_deref(), Some("acct_xyz"));
+        assert!(auth.openai_api_key.is_none());
+        assert!(auth.personal_access_token.is_none());
+    }
+
+    #[test]
+    fn test_codex_auth_file_api_key() {
+        let json = serde_json::json!({
+            "OPENAI_API_KEY": "sk-test-key-123"
+        });
+        let auth: CodexAuthFile = serde_json::from_value(json).unwrap();
+        assert!(auth.tokens.is_none());
+        assert_eq!(auth.openai_api_key.as_deref(), Some("sk-test-key-123"));
+    }
+
+    #[test]
+    fn test_codex_auth_file_personal_access_token() {
+        let json = serde_json::json!({
+            "personal_access_token": "pat_secret_value"
+        });
+        let auth: CodexAuthFile = serde_json::from_value(json).unwrap();
+        assert!(auth.tokens.is_none());
+        assert!(auth.openai_api_key.is_none());
+        assert_eq!(
+            auth.personal_access_token.as_deref(),
+            Some("pat_secret_value")
+        );
+    }
+
+    // --- format_reset_time 测试 ---
+
+    #[test]
+    fn test_format_reset_time_future_hours() {
+        use chrono::Utc;
+        let future_ts = Utc::now().timestamp() + 7200;
+        let result = format_reset_time(future_ts);
+        assert!(result.contains("小时后重置"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_format_reset_time_future_minutes() {
+        use chrono::Utc;
+        let future_ts = Utc::now().timestamp() + 1800;
+        let result = format_reset_time(future_ts);
+        assert!(result.contains("分钟后重置"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_format_reset_time_invalid_timestamp() {
+        let result = format_reset_time(i64::MAX);
+        assert!(result.is_empty(), "got: {}", result);
+    }
 }

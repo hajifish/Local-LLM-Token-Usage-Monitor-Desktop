@@ -5,6 +5,8 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+const USER_AGENT: &str = "claude-code/2.1.0";
+
 /// Claude Code 订阅计划配额供应商。
 ///
 /// 从 `~/.claude/credentials.json` 读取 OAuth 令牌，调用 Anthropic OAuth 用量 API
@@ -13,12 +15,14 @@ use std::path::PathBuf;
 /// 与 Anthropic 组织成本 API（需管理员密钥）完全独立，适用于 Claude Pro/Max 订阅用户。
 pub struct ClaudeCodeProvider {
     client: Client,
+    cached_response: tokio::sync::OnceCell<ClaudeUsageResponse>,
 }
 
 impl ClaudeCodeProvider {
     pub fn new() -> Self {
         Self {
             client: http_client(),
+            cached_response: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -33,12 +37,13 @@ impl ClaudeCodeProvider {
             }
         })?;
 
-        let creds: ClaudeCredentialsFile = serde_json::from_str(&content).map_err(|e| {
-            ProviderError(format!("Claude Code 凭证格式错误: {}", e))
-        })?;
+        let creds: ClaudeCredentialsFile = serde_json::from_str(&content)
+            .map_err(|e| ProviderError(format!("Claude Code 凭证格式错误: {}", e)))?;
 
         let oauth = creds.claude_ai_oauth.ok_or_else(|| {
-            ProviderError("Claude Code 凭证中未找到 OAuth 信息，请先运行 `claude login`".to_string())
+            ProviderError(
+                "Claude Code 凭证中未找到 OAuth 信息，请先运行 `claude login`".to_string(),
+            )
         })?;
 
         Ok(ClaudeCredentials {
@@ -47,9 +52,8 @@ impl ClaudeCodeProvider {
     }
 
     fn credentials_path() -> Result<PathBuf, ProviderError> {
-        let home = dirs::home_dir().ok_or_else(|| {
-            ProviderError("无法获取用户主目录".to_string())
-        })?;
+        let home =
+            dirs::home_dir().ok_or_else(|| ProviderError("无法获取用户主目录".to_string()))?;
         Ok(home.join(".claude").join("credentials.json"))
     }
 }
@@ -61,8 +65,7 @@ impl LlmProvider for ClaudeCodeProvider {
     }
 
     async fn fetch_balance(&self) -> Result<BalanceData, ProviderError> {
-        let creds = Self::read_credentials()?;
-        let usage = self.fetch_usage_response(&creds).await?;
+        let usage = self.fetch_usage_response().await?;
 
         // 主窗口：优先 five_hour，回退到 seven_day
         let remaining = usage
@@ -83,8 +86,7 @@ impl LlmProvider for ClaudeCodeProvider {
     }
 
     async fn fetch_quota_infos(&self) -> Result<Option<Vec<QuotaInfo>>, ProviderError> {
-        let creds = Self::read_credentials()?;
-        let usage = self.fetch_usage_response(&creds).await?;
+        let usage = self.fetch_usage_response().await?;
 
         let mut quotas = Vec::new();
 
@@ -149,16 +151,18 @@ impl LlmProvider for ClaudeCodeProvider {
 }
 
 impl ClaudeCodeProvider {
-    async fn fetch_usage_response(
-        &self,
-        creds: &ClaudeCredentials,
-    ) -> Result<ClaudeUsageResponse, ProviderError> {
+    /// 通过 OnceCell 缓存只发一次请求，同一轮调度内 fetch_balance 与 fetch_quota_infos 共享结果。
+    async fn fetch_usage_response(&self) -> Result<ClaudeUsageResponse, ProviderError> {
+        if let Some(cached) = self.cached_response.get() {
+            return Ok(cached.clone());
+        }
+        let creds = Self::read_credentials()?;
         let resp = self
             .client
             .get("https://api.anthropic.com/api/oauth/usage")
             .header("Authorization", format!("Bearer {}", creds.access_token))
             .header("anthropic-beta", "oauth-2025-04-20")
-            .header("User-Agent", "claude-code/2.1.0")
+            .header("User-Agent", USER_AGENT)
             .header("Accept", "application/json")
             .send()
             .await
@@ -177,9 +181,12 @@ impl ClaudeCodeProvider {
             )));
         }
 
-        resp.json().await.map_err(|e| {
-            ProviderError(format!("Claude Code API 响应解析失败: {}", e))
-        })
+        let resp: ClaudeUsageResponse = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError(format!("Claude Code API 响应解析失败: {}", e)))?;
+        let _ = self.cached_response.set(resp.clone());
+        Ok(resp)
     }
 }
 
@@ -222,7 +229,7 @@ struct ClaudeCredentials {
     access_token: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ClaudeUsageResponse {
     five_hour: Option<ClaudeUsageWindow>,
     seven_day: Option<ClaudeUsageWindow>,
@@ -232,9 +239,118 @@ struct ClaudeUsageResponse {
     seven_day_sonnet: Option<ClaudeUsageWindow>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ClaudeUsageWindow {
     utilization: f64,
     #[serde(rename = "resets_at")]
     resets_at: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ClaudeUsageResponse 反序列化测试 ---
+
+    #[test]
+    fn test_claude_usage_response_with_five_hour_and_seven_day() {
+        let json = serde_json::json!({
+            "five_hour": {
+                "utilization": 35.5,
+                "resets_at": "2025-09-06T18:00:00Z"
+            },
+            "seven_day": {
+                "utilization": 60.0,
+                "resets_at": "2025-09-12T00:00:00Z"
+            },
+            "seven_day_opus": {
+                "utilization": 10.0,
+                "resets_at": "2025-09-12T00:00:00Z"
+            },
+            "seven_day_sonnet": {
+                "utilization": 20.0,
+                "resets_at": "2025-09-12T00:00:00Z"
+            }
+        });
+        let resp: ClaudeUsageResponse = serde_json::from_value(json).unwrap();
+        let fh = resp.five_hour.unwrap();
+        assert!((fh.utilization - 35.5).abs() < f64::EPSILON);
+        assert_eq!(fh.resets_at.as_deref(), Some("2025-09-06T18:00:00Z"));
+        let sd = resp.seven_day.unwrap();
+        assert!((sd.utilization - 60.0).abs() < f64::EPSILON);
+        let opus = resp.seven_day_opus.unwrap();
+        assert!((opus.utilization - 10.0).abs() < f64::EPSILON);
+        let sonnet = resp.seven_day_sonnet.unwrap();
+        assert!((sonnet.utilization - 20.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_claude_usage_response_empty() {
+        let json = serde_json::json!({});
+        let resp: ClaudeUsageResponse = serde_json::from_value(json).unwrap();
+        assert!(resp.five_hour.is_none());
+        assert!(resp.seven_day.is_none());
+        assert!(resp.seven_day_opus.is_none());
+        assert!(resp.seven_day_sonnet.is_none());
+    }
+
+    #[test]
+    fn test_claude_usage_response_partial() {
+        let json = serde_json::json!({
+            "five_hour": {
+                "utilization": 0.0,
+                "resets_at": null
+            }
+        });
+        let resp: ClaudeUsageResponse = serde_json::from_value(json).unwrap();
+        let fh = resp.five_hour.unwrap();
+        assert!((fh.utilization - 0.0).abs() < f64::EPSILON);
+        assert!(fh.resets_at.is_none());
+        assert!(resp.seven_day.is_none());
+    }
+
+    // --- ClaudeCredentialsFile 反序列化测试 ---
+
+    #[test]
+    fn test_claude_credentials_file() {
+        let json = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "sk-ant-oauth-tok"
+            }
+        });
+        let creds: ClaudeCredentialsFile = serde_json::from_value(json).unwrap();
+        let oauth = creds.claude_ai_oauth.unwrap();
+        assert_eq!(oauth.access_token, "sk-ant-oauth-tok");
+    }
+
+    #[test]
+    fn test_claude_credentials_file_missing_oauth() {
+        let json = serde_json::json!({});
+        let creds: ClaudeCredentialsFile = serde_json::from_value(json).unwrap();
+        assert!(creds.claude_ai_oauth.is_none());
+    }
+
+    // --- format_iso_reset 测试 ---
+
+    #[test]
+    fn test_format_iso_reset_future_days() {
+        use chrono::Utc;
+        let future = (Utc::now() + chrono::Duration::days(3)).to_rfc3339();
+        let result = format_iso_reset(&future);
+        assert!(result.contains("天后重置"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_format_iso_reset_future_hours() {
+        use chrono::Utc;
+        let future = (Utc::now() + chrono::Duration::hours(4)).to_rfc3339();
+        let result = format_iso_reset(&future);
+        assert!(result.contains("小时后重置"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_format_iso_reset_invalid_string() {
+        let result = format_iso_reset("not-a-date");
+        assert_eq!(result, "not-a-date");
+    }
 }

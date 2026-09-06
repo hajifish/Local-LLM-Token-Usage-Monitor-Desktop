@@ -121,7 +121,14 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     // 初始菜单：打开主页面 在顶部，scheduler 会动态替换为带详情版本的完整菜单
     let menu = Menu::with_items(
         app,
-        &[&open_item, &separator2, &refresh_item, &separator, &settings_item, &quit_item],
+        &[
+            &open_item,
+            &separator2,
+            &refresh_item,
+            &separator,
+            &settings_item,
+            &quit_item,
+        ],
     )?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
@@ -132,12 +139,10 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .join("icons")
         .join("tray-icon@2x.png");
     let fallback = || {
-        app.default_window_icon()
-            .cloned()
-            .unwrap_or_else(|| {
-                log::error!("No default window icon available");
-                panic!("No tray icon could be loaded")
-            })
+        app.default_window_icon().cloned().unwrap_or_else(|| {
+            log::error!("No default window icon available");
+            panic!("No tray icon could be loaded")
+        })
     };
     let tray_icon = if icon_path.exists() {
         Image::from_path(&icon_path).unwrap_or_else(|_| fallback())
