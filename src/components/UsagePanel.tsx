@@ -19,6 +19,18 @@ function BrandLogo({ name }: { name: string }) {
   return <span className="brand-logo">{initial}</span>;
 }
 
+function CardHead({ name, alias, badge }: { name: string; alias: string; badge?: { text: string; cls: string } }) {
+  return (
+    <div className="p-card-head">
+      <span className="p-card-brand">
+        <BrandLogo name={name} />
+        <span className="p-card-name">{alias}</span>
+      </span>
+      {badge && <span className={`p-card-badge ${badge.cls}`}>{badge.text}</span>}
+    </div>
+  );
+}
+
 // 0 = ok, 1 = yellow (low), 2 = red (empty)
 function warningLevel(p: ProviderStatus): number {
   if (!p.balance) return 0;
@@ -33,13 +45,7 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
   if (!p.enabled) {
     return (
       <div className="p-card p-card-disabled">
-        <div className="p-card-head">
-          <span className="p-card-brand">
-            <BrandLogo name={p.name} />
-            <span className="p-card-name">{p.alias}</span>
-          </span>
-          <span className="p-card-badge gray">已禁用</span>
-        </div>
+        <CardHead name={p.name} alias={p.alias} badge={{ text: "已禁用", cls: "gray" }} />
       </div>
     );
   }
@@ -47,13 +53,7 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
   if (p.error) {
     return (
       <div className="p-card p-card-error">
-        <div className="p-card-head">
-          <span className="p-card-brand">
-            <BrandLogo name={p.name} />
-            <span className="p-card-name">{p.alias}</span>
-          </span>
-          <span className="p-card-badge red">异常</span>
-        </div>
+        <CardHead name={p.name} alias={p.alias} badge={{ text: "异常", cls: "red" }} />
         <p className="p-card-error-msg">{p.error}</p>
       </div>
     );
@@ -71,12 +71,7 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
   return (
     <div className={`p-card ${warnClass}`.trim()}>
       {/* Card header with brand logo */}
-      <div className="p-card-head">
-        <span className="p-card-brand">
-          <BrandLogo name={p.name} />
-          <span className="p-card-name">{p.alias}</span>
-        </span>
-      </div>
+      <CardHead name={p.name} alias={p.alias} />
 
       {/* Main display: big number */}
       {balance && (

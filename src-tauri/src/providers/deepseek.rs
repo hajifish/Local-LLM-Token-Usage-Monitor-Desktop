@@ -1,8 +1,8 @@
+use super::{http_client, send_json, LlmProvider, ProviderError};
+use crate::models::{BalanceData, UsageData};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use crate::models::{BalanceData, UsageData};
-use super::{LlmProvider, ProviderError};
 
 pub struct DeepSeekProvider {
     client: Client,
@@ -12,6 +12,7 @@ pub struct DeepSeekProvider {
 
 #[derive(Deserialize)]
 struct BalanceResponse {
+    #[allow(dead_code)] // API 返回字段，当前逻辑未消费，保留以完整反序列化响应结构
     is_available: bool,
     balance_infos: Vec<BalanceInfo>,
 }
@@ -54,12 +55,8 @@ struct UsageItem {
 
 impl DeepSeekProvider {
     pub fn new(api_key: &str, platform_token: Option<&str>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            client,
+            client: http_client(),
             api_key: api_key.to_string(),
             platform_token: platform_token.map(|s| s.to_string()),
         }
@@ -68,19 +65,21 @@ impl DeepSeekProvider {
 
 #[async_trait]
 impl LlmProvider for DeepSeekProvider {
-    fn name(&self) -> &str { "DeepSeek" }
+    fn name(&self) -> &str {
+        "DeepSeek"
+    }
 
     async fn fetch_balance(&self) -> Result<BalanceData, ProviderError> {
-        let resp = self.client.get("https://api.deepseek.com/user/balance")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .send().await.map_err(|e| ProviderError(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            return Err(ProviderError(format!("DeepSeek API error: {}", resp.status())));
-        }
-
-        let data: BalanceResponse = resp.json().await.map_err(|e| ProviderError(e.to_string()))?;
-        let info = data.balance_infos.first()
+        let data: BalanceResponse = send_json(
+            self.client
+                .get("https://api.deepseek.com/user/balance")
+                .header("Authorization", format!("Bearer {}", self.api_key)),
+            "DeepSeek",
+        )
+        .await?;
+        let info = data
+            .balance_infos
+            .first()
             .ok_or_else(|| ProviderError("No balance info".to_string()))?;
 
         let total: f64 = info.total_balance.parse().unwrap_or(0.0);
@@ -122,16 +121,17 @@ impl LlmProvider for DeepSeekProvider {
             month, year
         );
 
-        let resp = self.client.get(&url)
-            .header("Authorization", format!("Bearer {}", platform_token))
-            .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-            .send().await.map_err(|e| ProviderError(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            return Err(ProviderError(format!("DeepSeek platform API error: {}", resp.status())));
-        }
-
-        let data: UsageResponse = resp.json().await.map_err(|e| ProviderError(e.to_string()))?;
+        let data: UsageResponse = send_json(
+            self.client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", platform_token))
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                ),
+            "DeepSeek platform",
+        )
+        .await?;
 
         let days = match data.biz_data.and_then(|b| b.days) {
             Some(d) => d,
@@ -154,13 +154,17 @@ impl LlmProvider for DeepSeekProvider {
         for entry in today_entries {
             if let Some(ref items) = entry.usage {
                 for item in items {
-                    let amount: u64 = item.amount.as_ref()
+                    let amount: u64 = item
+                        .amount
+                        .as_ref()
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(0);
-                    
+
                     match item.item_type.as_deref() {
                         Some("REQUEST") => requests += amount,
-                        Some("PROMPT_TOKEN") | Some("PROMPT_CACHE_MISS_TOKEN") | Some("PROMPT_CACHE_HIT_TOKEN") => {
+                        Some("PROMPT_TOKEN")
+                        | Some("PROMPT_CACHE_MISS_TOKEN")
+                        | Some("PROMPT_CACHE_HIT_TOKEN") => {
                             prompt_tokens += amount;
                             total_tokens += amount;
                         }

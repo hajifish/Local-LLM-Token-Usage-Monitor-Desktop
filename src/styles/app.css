@@ -95,9 +95,8 @@
   margin-right: 2px;
 }
 
-.header-refresh-btn {
-  width: 28px;
-  height: 28px;
+.header-refresh-btn,
+.settings-icon-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -109,7 +108,13 @@
   transition: all 0.15s;
 }
 
-.header-refresh-btn:hover {
+.header-refresh-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.header-refresh-btn:hover,
+.settings-icon-btn:hover {
   background: var(--system-tertiary-bg);
   color: var(--system-label);
 }
@@ -125,20 +130,6 @@
 .settings-icon-btn {
   width: 32px;
   height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--system-secondary-label);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.settings-icon-btn:hover {
-  background: var(--system-tertiary-bg);
-  color: var(--system-label);
 }
 
 .usage-view {

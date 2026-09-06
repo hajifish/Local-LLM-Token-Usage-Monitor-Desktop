@@ -1,11 +1,12 @@
+pub mod anthropic;
+pub mod costs;
 pub mod deepseek;
 pub mod kimi;
-pub mod zhipu;
 pub mod openai;
-pub mod anthropic;
+pub mod zhipu;
 
+use crate::models::{BalanceData, QuotaInfo, UsageData};
 use async_trait::async_trait;
-use crate::models::{BalanceData, UsageData, QuotaInfo};
 
 #[derive(Debug)]
 pub struct ProviderError(pub String);
@@ -30,15 +31,68 @@ pub trait LlmProvider: Send + Sync {
     }
 }
 
-pub fn create_provider(name: &str, api_key: &str, platform_token: Option<&str>) -> Option<Box<dyn LlmProvider>> {
+pub fn create_provider(
+    name: &str,
+    api_key: &str,
+    platform_token: Option<&str>,
+) -> Option<Box<dyn LlmProvider>> {
     match name {
-        "DeepSeek" => Some(Box::new(deepseek::DeepSeekProvider::new(api_key, platform_token))),
+        "DeepSeek" => Some(Box::new(deepseek::DeepSeekProvider::new(
+            api_key,
+            platform_token,
+        ))),
         "Kimi" => Some(Box::new(kimi::KimiProvider::new(api_key))),
         "Zhipu" => Some(Box::new(zhipu::ZhipuProvider::new(api_key))),
         "OpenAI" => Some(Box::new(openai::OpenAiProvider::new(api_key))),
         "Anthropic" => Some(Box::new(anthropic::AnthropicProvider::new(api_key))),
         _ => None,
     }
+}
+
+/// 构造各 Provider 共享的 HTTP 客户端。
+/// 带 15s 超时，避免串行轮询被单个请求挂起
+pub(crate) fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// 发送请求并解析 JSON 响应的公共样板（参数化版）：send → 状态检查 → resp.json()。
+/// on_status 用于对特定状态码做自定义错误映射：返回 Some(err) 则短路返回该错误（如 401/403 → Admin Key），
+/// 返回 None 时走默认非 2xx 处理，默认错误文案 "<provider_label> API error: <status>" 与各 Provider 原有实现逐字一致。
+/// 各调用点自行组装 header（如 DeepSeek platform 接口的 User-Agent、其余 Bearer 认证）。
+pub(crate) async fn send_json_with<T: serde::de::DeserializeOwned>(
+    request: reqwest::RequestBuilder,
+    provider_label: &str,
+    on_status: impl FnOnce(reqwest::StatusCode) -> Option<ProviderError>,
+) -> Result<T, ProviderError> {
+    let resp = request
+        .send()
+        .await
+        .map_err(|e| ProviderError(e.to_string()))?;
+
+    let status = resp.status();
+    if let Some(err) = on_status(status) {
+        return Err(err);
+    }
+    if !status.is_success() {
+        return Err(ProviderError(format!(
+            "{} API error: {}",
+            provider_label, status
+        )));
+    }
+
+    resp.json().await.map_err(|e| ProviderError(e.to_string()))
+}
+
+/// send_json_with 的薄封装：无自定义状态映射（on_status 恒返回 None），仅走默认非 2xx 错误处理。
+/// 错误文案 "<provider_label> API error: <status>" 与各 Provider 原有实现逐字一致。
+pub(crate) async fn send_json<T: serde::de::DeserializeOwned>(
+    request: reqwest::RequestBuilder,
+    provider_label: &str,
+) -> Result<T, ProviderError> {
+    send_json_with(request, provider_label, |_| None).await
 }
 
 /// 宽容地把成本 API 里的 amount 字段解析为 f64。
@@ -83,30 +137,6 @@ pub(crate) fn month_start_utc() -> chrono::DateTime<chrono::Utc> {
         .unwrap_or_else(|| local_midnight.and_utc())
 }
 
-/// OpenAI 分页游标：从响应取 has_more + last_id（续查参数为 after=<last_id>）。
-pub(crate) fn openai_next_cursor(v: &serde_json::Value) -> Option<String> {
-    let has_more = v.get("has_more").and_then(|x| x.as_bool()).unwrap_or(false);
-    if !has_more {
-        return None;
-    }
-    v.get("last_id")
-        .and_then(|x| x.as_str())
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// Anthropic 分页游标：从响应取 has_more + next_page（续查参数为 page=<next_page>）。
-pub(crate) fn anthropic_next_cursor(v: &serde_json::Value) -> Option<String> {
-    let has_more = v.get("has_more").and_then(|x| x.as_bool()).unwrap_or(false);
-    if !has_more {
-        return None;
-    }
-    v.get("next_page")
-        .and_then(|x| x.as_str())
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty())
-}
-
 /// 在已有查询串的 base_url 上追加一个查询参数，并对 value 做百分号编码。
 /// 用 reqwest::Url 保证不透明游标含 &/=/+/空格 等字符时续查 URL 不畸形（避免重复取回首页重复累加或请求失败）。
 /// base_url 由本模块构造、恒为合法 URL；解析失败时兜底为朴素拼接（不 panic）。
@@ -120,45 +150,35 @@ pub(crate) fn append_query_param(base_url: &str, key: &str, value: &str) -> Stri
     }
 }
 
+/// 测试共享工具：消除 mod.rs / openai.rs / anthropic.rs 三处重复的 val() 定义。
 #[cfg(test)]
-mod tests {
-    use super::{amount_to_f64, openai_next_cursor, anthropic_next_cursor, append_query_param};
-
-    fn val(s: &str) -> serde_json::Value {
+pub(crate) mod test_util {
+    pub(crate) fn val(s: &str) -> serde_json::Value {
         serde_json::from_str(s).unwrap()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_util::val;
+    use super::{amount_to_f64, append_query_param};
 
     #[test]
     fn test_amount_to_f64_all_forms() {
         assert_eq!(amount_to_f64(&val("1.5")), 1.5);
         assert_eq!(amount_to_f64(&val("\"2.25\"")), 2.25);
-        assert_eq!(amount_to_f64(&val(r#"{"value": 3.0, "currency": "usd"}"#)), 3.0);
+        assert_eq!(
+            amount_to_f64(&val(r#"{"value": 3.0, "currency": "usd"}"#)),
+            3.0
+        );
         assert_eq!(amount_to_f64(&val(r#"{"value": "4.5"}"#)), 4.5);
         // 未支持形态 -> 0.0
         assert_eq!(amount_to_f64(&val(r#"{"foo": 1}"#)), 0.0);
         assert_eq!(amount_to_f64(&val("null")), 0.0);
     }
 
-    #[test]
-    fn test_openai_cursor_uses_last_id() {
-        // OpenAI 约定：has_more + last_id
-        assert_eq!(openai_next_cursor(&val(r#"{"has_more": true, "last_id": "bucket_abc"}"#)), Some("bucket_abc".to_string()));
-        assert_eq!(openai_next_cursor(&val(r#"{"has_more": false, "last_id": "bucket_abc"}"#)), None);
-        assert_eq!(openai_next_cursor(&val(r#"{"has_more": true, "last_id": null}"#)), None);
-        assert_eq!(openai_next_cursor(&val(r#"{"has_more": true, "last_id": ""}"#)), None);
-        // OpenAI 不读 next_page（那是 Anthropic 约定）
-        assert_eq!(openai_next_cursor(&val(r#"{"has_more": true, "next_page": "xyz"}"#)), None);
-    }
-
-    #[test]
-    fn test_anthropic_cursor_uses_next_page() {
-        assert_eq!(anthropic_next_cursor(&val(r#"{"has_more": true, "next_page": "abc"}"#)), Some("abc".to_string()));
-        assert_eq!(anthropic_next_cursor(&val(r#"{"has_more": false, "next_page": "abc"}"#)), None);
-        assert_eq!(anthropic_next_cursor(&val(r#"{"has_more": true, "next_page": null}"#)), None);
-        assert_eq!(anthropic_next_cursor(&val(r#"{"has_more": true, "next_page": ""}"#)), None);
-        // Anthropic 不读 last_id
-        assert_eq!(anthropic_next_cursor(&val(r#"{"has_more": true, "last_id": "xyz"}"#)), None);
-    }
+    // 游标语义测试已随 openai_next_cursor / anthropic_next_cursor 合并迁移至 costs.rs（next_cursor），
+    // “OpenAI 不读 next_page / Anthropic 不读 last_id”的断言在 costs.rs 测试中逐条保留。
 
     #[test]
     fn test_append_query_param_encodes_cursor() {
@@ -174,7 +194,11 @@ mod tests {
             .map(|(_, v)| v.into_owned())
             .expect("after 应存在");
         assert_eq!(after, "a&b=c+d e");
-        assert!(parsed.query_pairs().any(|(k, v)| k == "starting_at" && v == "1"));
-        assert!(parsed.query_pairs().any(|(k, v)| k == "limit" && v == "200"));
+        assert!(parsed
+            .query_pairs()
+            .any(|(k, v)| k == "starting_at" && v == "1"));
+        assert!(parsed
+            .query_pairs()
+            .any(|(k, v)| k == "limit" && v == "200"));
     }
 }

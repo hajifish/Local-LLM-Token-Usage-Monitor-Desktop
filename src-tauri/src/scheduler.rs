@@ -1,9 +1,12 @@
-use std::sync::Arc;
-use tokio::sync::{RwLock, Notify};
-use tokio::time::Duration;
-use tauri::{AppHandle, Emitter, menu::{Menu, MenuItem, PredefinedMenuItem}};
 use crate::models::{AppConfig, ProviderStatus, UsageSummary};
 use crate::providers;
+use std::sync::Arc;
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    AppHandle, Emitter,
+};
+use tokio::sync::{Notify, RwLock};
+use tokio::time::Duration;
 
 pub struct Scheduler {
     app_handle: AppHandle,
@@ -13,19 +16,6 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(
-        app_handle: AppHandle,
-        config: Arc<RwLock<AppConfig>>,
-        last_summary: Arc<RwLock<UsageSummary>>,
-    ) -> Self {
-        Self {
-            app_handle,
-            config,
-            last_summary,
-            notify: Arc::new(Notify::new()),
-        }
-    }
-
     pub fn new_with_notify(
         app_handle: AppHandle,
         config: Arc<RwLock<AppConfig>>,
@@ -38,10 +28,6 @@ impl Scheduler {
             last_summary,
             notify,
         }
-    }
-
-    pub fn notify(&self) {
-        self.notify.notify_one();
     }
 
     pub fn start(&self) {
@@ -91,7 +77,9 @@ async fn poll_providers(
     let mut total_balance = 0.0;
 
     for provider_cfg in &cfg.providers {
-        let display_alias = provider_cfg.alias.clone()
+        let display_alias = provider_cfg
+            .alias
+            .clone()
             .filter(|a| !a.trim().is_empty())
             .unwrap_or_else(|| provider_cfg.name.clone());
 
@@ -176,13 +164,23 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         for p in &summary.providers {
             if let Some(ref balance) = p.balance {
                 if balance.is_percent() {
-                    tooltip_lines.push(format!("{}: 剩余 {:.0}%", p.alias, balance.available_balance));
+                    tooltip_lines.push(format!(
+                        "{}: 剩余 {:.0}%",
+                        p.alias, balance.available_balance
+                    ));
                 } else if balance.is_usd() {
-                    tooltip_lines.push(format!("{}: 本月 ${:.2}", p.alias, balance.available_balance));
+                    tooltip_lines.push(format!(
+                        "{}: 本月 ${:.2}",
+                        p.alias, balance.available_balance
+                    ));
                 } else {
-                    tooltip_lines.push(format!("{}: ¥{:.2} (赠金 ¥{:.2} / 现金 ¥{:.2})",
-                        p.alias, balance.available_balance,
-                        balance.voucher_balance, balance.cash_balance));
+                    tooltip_lines.push(format!(
+                        "{}: ¥{:.2} (赠金 ¥{:.2} / 现金 ¥{:.2})",
+                        p.alias,
+                        balance.available_balance,
+                        balance.voucher_balance,
+                        balance.cash_balance
+                    ));
                 }
             } else if p.error.is_some() {
                 tooltip_lines.push(format!("{}: 获取失败", p.alias));
@@ -193,21 +191,34 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         let _ = tray.set_tooltip(Some(&tooltip_lines.join("\n")));
 
         // --- 动态构建主菜单（供应商状态内联展开，不再用二级子菜单） ---
-        let Ok(menu) = Menu::new(app_handle) else { return };
+        let Ok(menu) = Menu::new(app_handle) else {
+            return;
+        };
 
         // 关键项（refresh/settings/quit）append 必须全部成功才装配菜单，
         // 否则会装上缺少“退出”的菜单（ActivationPolicy::Accessory 下托盘退出是唯一出口）。
         let mut critical_ok = true;
 
         // 1) 刷新数据
-        let Ok(refresh_item) = MenuItem::with_id(app_handle, "refresh", "刷新数据", true, None::<&str>) else { return };
+        let Ok(refresh_item) =
+            MenuItem::with_id(app_handle, "refresh", "刷新数据", true, None::<&str>)
+        else {
+            return;
+        };
         critical_ok &= menu.append(&refresh_item).is_ok();
-        let Ok(separator_top) = PredefinedMenuItem::separator(app_handle) else { return };
+        let Ok(separator_top) = PredefinedMenuItem::separator(app_handle) else {
+            return;
+        };
         critical_ok &= menu.append(&separator_top).is_ok();
 
         // 2) 供应商状态条目（disabled，不可点击），上限 50 条；id 加序号防别名重复冲突
         const MAX_PROVIDER_ITEMS: usize = 50;
-        for (i, p) in summary.providers.iter().take(MAX_PROVIDER_ITEMS).enumerate() {
+        for (i, p) in summary
+            .providers
+            .iter()
+            .take(MAX_PROVIDER_ITEMS)
+            .enumerate()
+        {
             let text = if let Some(ref balance) = p.balance {
                 if balance.is_percent() {
                     format!("{}: 剩余 {:.0}%", p.alias, balance.available_balance)
@@ -221,7 +232,13 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             } else {
                 format!("{}: 无数据", p.alias)
             };
-            if let Ok(item) = MenuItem::with_id(app_handle, &format!("detail_{}_{}", i, p.alias), &text, false, None::<&str>) {
+            if let Ok(item) = MenuItem::with_id(
+                app_handle,
+                format!("detail_{}_{}", i, p.alias),
+                &text,
+                false,
+                None::<&str>,
+            ) {
                 let _ = menu.append(&item); // 供应商展示项失败可忽略
             }
         }
@@ -229,24 +246,37 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 3) 超过上限则追加截断提示
         if summary.providers.len() > MAX_PROVIDER_ITEMS {
             let text = format!("…共 {} 个供应商", summary.providers.len());
-            if let Ok(item) = MenuItem::with_id(app_handle, "provider_overflow", &text, false, None::<&str>) {
+            if let Ok(item) =
+                MenuItem::with_id(app_handle, "provider_overflow", &text, false, None::<&str>)
+            {
                 let _ = menu.append(&item);
             }
         }
 
         // 4) 没有任何服务商时放一个占位项
         if summary.providers.is_empty() {
-            if let Ok(item) = MenuItem::with_id(app_handle, "no_provider", "暂无服务商", false, None::<&str>) {
+            if let Ok(item) =
+                MenuItem::with_id(app_handle, "no_provider", "暂无服务商", false, None::<&str>)
+            {
                 let _ = menu.append(&item);
             }
         }
 
         // 5) 设置 / 退出
-        let Ok(separator_bottom) = PredefinedMenuItem::separator(app_handle) else { return };
+        let Ok(separator_bottom) = PredefinedMenuItem::separator(app_handle) else {
+            return;
+        };
         critical_ok &= menu.append(&separator_bottom).is_ok();
-        let Ok(settings_item) = MenuItem::with_id(app_handle, "settings", "设置...", true, None::<&str>) else { return };
+        let Ok(settings_item) =
+            MenuItem::with_id(app_handle, "settings", "设置...", true, None::<&str>)
+        else {
+            return;
+        };
         critical_ok &= menu.append(&settings_item).is_ok();
-        let Ok(quit_item) = MenuItem::with_id(app_handle, "quit", "退出", true, None::<&str>) else { return };
+        let Ok(quit_item) = MenuItem::with_id(app_handle, "quit", "退出", true, None::<&str>)
+        else {
+            return;
+        };
         critical_ok &= menu.append(&quit_item).is_ok();
 
         // 仅当关键项全部装配成功才替换菜单，否则保留旧菜单

@@ -1,8 +1,8 @@
+use super::{http_client, send_json, LlmProvider, ProviderError};
+use crate::models::BalanceData;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use crate::models::BalanceData;
-use super::{LlmProvider, ProviderError};
 
 pub struct KimiProvider {
     client: Client,
@@ -24,28 +24,27 @@ struct KimiBalanceData {
 
 impl KimiProvider {
     pub fn new(api_key: &str) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        Self { client, api_key: api_key.to_string() }
+        Self {
+            client: http_client(),
+            api_key: api_key.to_string(),
+        }
     }
 }
 
 #[async_trait]
 impl LlmProvider for KimiProvider {
-    fn name(&self) -> &str { "Kimi" }
+    fn name(&self) -> &str {
+        "Kimi"
+    }
 
     async fn fetch_balance(&self) -> Result<BalanceData, ProviderError> {
-        let resp = self.client.get("https://api.moonshot.cn/v1/users/me/balance")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .send().await.map_err(|e| ProviderError(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            return Err(ProviderError(format!("Kimi API error: {}", resp.status())));
-        }
-
-        let data: KimiBalanceResponse = resp.json().await.map_err(|e| ProviderError(e.to_string()))?;
+        let data: KimiBalanceResponse = send_json(
+            self.client
+                .get("https://api.moonshot.cn/v1/users/me/balance")
+                .header("Authorization", format!("Bearer {}", self.api_key)),
+            "Kimi",
+        )
+        .await?;
         if data.code != 0 {
             return Err(ProviderError(format!("Kimi API error code: {}", data.code)));
         }

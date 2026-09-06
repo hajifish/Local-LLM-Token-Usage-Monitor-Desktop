@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Monitor local LLM token usage across multiple providers"
 authors = ["hajifish"]
 edition = "2021"
+rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop"
 
@@ -25,6 +26,20 @@ reqwest = { version = "0.12", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 log = "0.4"
+# 日志落地（LogDir + Stdout）：未安装 logger 时 log crate 走 NopLogger，
+# release 构建下迁移失败/解密失败/指纹降级等诊断信息会全部丢失
+tauri-plugin-log = "2"
+# 本地加密存储：XChaCha20-Poly1305 AEAD + blake3 密钥派生 + base64 编码（均为纯 Rust 实现）
+chacha20poly1305 = "0.11"
+# pure 特性禁用 C/汇编实现，避免引入 cc 依赖与交叉编译敏感点（本应用每次启动仅一次 KDF，吞吐无关）
+blake3 = { version = "1", default-features = false, features = ["std", "pure"] }
+base64 = "0.23"
+# 敏感数据（派生密钥、明文配置）离开作用域时清零，减少内存滞留
+zeroize = "1"
+
+# Windows 机器指纹来源：注册表 MachineGuid
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.56"
 
 [profile.release]
 lto = true
