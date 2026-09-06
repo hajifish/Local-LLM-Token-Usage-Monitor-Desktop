@@ -34,6 +34,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable (pinned 2026-09-03)
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.7.7
+        with:
+          workspaces: src-tauri
+
       - name: Install frontend dependencies
         run: npm ci
 
