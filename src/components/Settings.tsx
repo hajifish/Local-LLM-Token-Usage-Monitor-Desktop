@@ -82,6 +82,11 @@ function basename(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
+/** 根据 provider 标识取默认显示名（下拉框 label）；未知类型兜底返回标识本身。 */
+function providerLabel(name: string): string {
+  return PROVIDER_OPTIONS.find((o) => o.value === name)?.label || name;
+}
+
 function Settings({ onBack }: SettingsProps) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [health, setHealth] = useState<ConfigHealth | null>(null);
@@ -133,16 +138,32 @@ function Settings({ onBack }: SettingsProps) {
   const addProvider = () => {
     if (!config) return;
     const def = PROVIDER_OPTIONS[0];
+    // 别名只承载用户自定义值：新增时不预填，展示时由后端回退到供应商默认名
     setConfig({
       ...config,
-      providers: [...config.providers, { name: def.value, api_key: "", enabled: true, platform_token: null, alias: def.label }],
+      providers: [...config.providers, { name: def.value, api_key: "", enabled: true, platform_token: null, alias: null }],
     });
+  };
+
+  /**
+   * 切换供应商类型：别名只承载用户自定义值。
+   * - 别名为空、或恰好等于旧类型的默认名（历史预填残留）→ 置空，让后端回退到新类型默认名；
+   * - 用户已输入自定义别名 → 保留，不因切换类型而丢失。
+   */
+  const handleProviderNameChange = (index: number, newName: string) => {
+    if (!config) return;
+    const old = config.providers[index];
+    const oldAlias = (old.alias || "").trim();
+    const keepAlias = oldAlias !== "" && oldAlias !== providerLabel(old.name);
+    const newProviders = [...config.providers];
+    newProviders[index] = { ...old, name: newName, alias: keepAlias ? old.alias : null };
+    setConfig({ ...config, providers: newProviders });
   };
 
   const removeProvider = (index: number) => {
     if (!config) return;
     const p = config.providers[index];
-    const label = p.alias || PROVIDER_OPTIONS.find(o => o.value === p.name)?.label || p.name;
+    const label = p.alias || providerLabel(p.name);
     if (!confirm(`确定要删除「${label}」的配置吗？`)) return;
     const newProviders = config.providers.filter((_, i) => i !== index);
     setConfig({ ...config, providers: newProviders });
@@ -258,7 +279,7 @@ function Settings({ onBack }: SettingsProps) {
         {config.providers.map((p, i) => (
           <div key={`${p.name}-${p.alias || i}`} className="provider-config">
             <div className="provider-config-header">
-              <select value={p.name} onChange={(e) => updateProvider(i, "name", e.target.value)}>
+              <select value={p.name} onChange={(e) => handleProviderNameChange(i, e.target.value)}>
                 {PROVIDER_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
@@ -275,7 +296,7 @@ function Settings({ onBack }: SettingsProps) {
             </div>
             <input
               type="text"
-              placeholder="别名（用于区分同服务商多账号）"
+              placeholder={`别名（用于区分同服务商多账号，不填默认显示为「${providerLabel(p.name)}」）`}
               value={p.alias || ""}
               onChange={(e) => updateProvider(i, "alias", e.target.value)}
             />
