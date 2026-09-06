@@ -8,14 +8,14 @@ interface SettingsProps {
 }
 
 const PROVIDER_OPTIONS = [
-  { value: 'Zhipu', label: '智谱' },
+  { value: 'OpenAI', label: 'OpenAI' },
+  { value: 'Codex', label: 'Codex (ChatGPT)' },
+  { value: 'Anthropic', label: 'Anthropic' },
+  { value: 'Claude Code', label: 'Claude Code' },
   { value: 'DeepSeek', label: 'DeepSeek' },
   { value: 'Kimi API', label: 'Kimi API' },
-  { value: 'OpenAI', label: 'OpenAI' },
-  { value: 'Anthropic', label: 'Anthropic' },
-  { value: 'Codex', label: 'Codex (ChatGPT)' },
-  { value: 'Claude Code', label: 'Claude Code' },
   { value: 'Kimi Code', label: 'Kimi Code' },
+  { value: 'Zhipu', label: '智谱' },
 ];
 
 /** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */
