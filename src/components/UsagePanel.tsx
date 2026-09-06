@@ -9,6 +9,7 @@ const BRAND_LOGOS: Record<string, string> = {
   Anthropic: '/providers/anthropic.png',
   Codex: '/providers/openai.png',
   'Claude Code': '/providers/anthropic.png',
+  'Kimi Code': '/providers/kimi.png',
 };
 
 function BrandLogo({ name }: { name: string }) {

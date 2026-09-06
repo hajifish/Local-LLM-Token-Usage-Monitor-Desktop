@@ -4,6 +4,7 @@ pub mod codex;
 pub mod costs;
 pub mod deepseek;
 pub mod kimi;
+pub mod kimi_code;
 pub mod openai;
 pub mod zhipu;
 
@@ -49,6 +50,7 @@ pub fn create_provider(
         "Anthropic" => Some(Box::new(anthropic::AnthropicProvider::new(api_key))),
         "Codex" => Some(Box::new(codex::CodexProvider::new())),
         "Claude Code" => Some(Box::new(claude_code::ClaudeCodeProvider::new())),
+        "Kimi Code" => Some(Box::new(kimi_code::KimiCodeProvider::new())),
         _ => None,
     }
 }

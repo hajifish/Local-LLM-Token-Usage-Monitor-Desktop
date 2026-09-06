@@ -15,10 +15,11 @@ const PROVIDER_OPTIONS = [
   { value: 'Anthropic', label: 'Anthropic' },
   { value: 'Codex', label: 'Codex (ChatGPT)' },
   { value: 'Claude Code', label: 'Claude Code' },
+  { value: 'Kimi Code', label: 'Kimi Code' },
 ];
 
 /** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */
-const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code']);
+const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code']);
 
 /** 刷新间隔预设选项：秒数 → 显示文案。 */
 const REFRESH_OPTIONS: { value: number; label: string }[] = [
@@ -334,7 +335,9 @@ function Settings({ onBack }: SettingsProps) {
                   <span className="ds-hint">
                     {p.name === 'Codex'
                       ? '自动从 ~/.codex/auth.json 读取凭证'
-                      : '自动从 ~/.claude/credentials.json 读取凭证'}
+                      : p.name === 'Claude Code'
+                        ? '自动从 ~/.claude/credentials.json 读取凭证'
+                        : '自动从 ~/.kimi-code/config.toml 读取凭证'}
                   </span>
                 ) : (
                   <input
