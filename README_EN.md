@@ -27,6 +27,7 @@ Head to [GitHub Releases](https://github.com/hajifish/Local-LLM-Token-Usage-Moni
 | Platform | Chip | Format |
 |----------|------|--------|
 | macOS | Apple Silicon (M1/M2/M3/M4) | `.dmg` |
+| Windows | x64 | `.msi` |
 
 > Intel-based Macs are not supported. If you need an Intel version, please build from source.
 

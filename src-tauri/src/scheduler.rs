@@ -72,7 +72,11 @@ async fn poll_providers(
     last_summary: &Arc<RwLock<UsageSummary>>,
 ) {
     log::info!("Starting provider data refresh");
-    let cfg = config.read().await;
+    let cfg = {
+        let c = config.read().await;
+        c.clone()
+    };
+    // 读锁已释放，后续网络请求不持锁
     let mut provider_statuses = Vec::new();
     let mut total_balance = 0.0;
 
@@ -284,4 +288,5 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             let _ = tray.set_menu(Some(menu));
         }
     }
+    let _ = app_handle;
 }

@@ -7,14 +7,15 @@ use serde::Deserialize;
 pub struct ZhipuProvider {
     client: Client,
     api_key: String,
+    cached_response: tokio::sync::OnceCell<ZhipuQuotaResponse>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ZhipuQuotaResponse {
     data: Option<ZhipuQuotaData>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ZhipuQuotaData {
     #[serde(rename = "planName")]
     plan_name: Option<String>,
@@ -22,7 +23,7 @@ struct ZhipuQuotaData {
     level: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ZhipuLimit {
     #[serde(rename = "type")]
     #[allow(dead_code)] // API 返回字段，当前 UI 未消费，保留以完整反序列化响应结构
@@ -46,20 +47,26 @@ impl ZhipuProvider {
         Self {
             client: http_client(),
             api_key: api_key.to_string(),
+            cached_response: tokio::sync::OnceCell::new(),
         }
     }
 
     /// 拉取配额端点并解析为 ZhipuQuotaResponse 的共享样板。
-    /// fetch_balance 与 fetch_quota_infos 对同一端点重复相同的 GET+Bearer+状态检查+JSON 解析，此处收编。
-    /// 每次调用仍各自发起一次请求，保持 scheduler 每轮请求次数语义不变。
+    /// fetch_balance 与 fetch_quota_infos 对同一端点重复相同的 GET+Bearer+状态检查+JSON 解析，
+    /// 通过 OnceCell 缓存只发一次请求，同一轮调度内两次调用共享结果。
     async fn fetch_quota_response(&self) -> Result<ZhipuQuotaResponse, ProviderError> {
-        send_json(
+        if let Some(cached) = self.cached_response.get() {
+            return Ok(cached.clone());
+        }
+        let resp: ZhipuQuotaResponse = send_json(
             self.client
                 .get("https://open.bigmodel.cn/api/monitor/usage/quota/limit")
                 .header("Authorization", format!("Bearer {}", self.api_key)),
             "Zhipu",
         )
-        .await
+        .await?;
+        let _ = self.cached_response.set(resp.clone());
+        Ok(resp)
     }
 
     fn format_reset_time(epoch_ms: u64) -> String {

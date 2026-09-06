@@ -27,6 +27,7 @@
 | 平台 | 芯片 | 文件格式 |
 |------|------|----------|
 | macOS | Apple Silicon (M1/M2/M3/M4) | `.dmg` |
+| Windows | x64 | `.msi` |
 
 > 暂不支持 Intel 芯片的 Mac。如需 Intel 版本，请自行从源码构建。
 

@@ -87,7 +87,7 @@ pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
                 let dx = x - cx;
                 let dy = y - cy;
                 let d2 = dx * dx + dy * dy;
-                let idx = ((y * w as i32 + x) * 4) as usize;
+                let idx = (y * w as i32 * 4 + x * 4) as usize;
                 if idx + 3 >= rgba.len() {
                     continue;
                 }
@@ -129,14 +129,22 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .expect("failed to get resource dir")
         .join("icons")
         .join("tray-icon@2x.png");
+    let fallback = || {
+        app.default_window_icon()
+            .cloned()
+            .unwrap_or_else(|| {
+                log::error!("No default window icon available");
+                panic!("No tray icon could be loaded")
+            })
+    };
     let tray_icon = if icon_path.exists() {
-        Image::from_path(&icon_path).unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
+        Image::from_path(&icon_path).unwrap_or_else(|_| fallback())
     } else {
         // dev 模式下从项目目录加载
         let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("icons")
             .join("tray-icon@2x.png");
-        Image::from_path(&dev_path).unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
+        Image::from_path(&dev_path).unwrap_or_else(|_| fallback())
     };
 
     TrayIconBuilder::with_id("main_tray")
@@ -168,12 +176,11 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
                 "refresh" => {
-                    // manual-refresh 前端无监听者（既有空操作）；直接触发调度器 Notify 立即轮询，
+                    // 直接触发调度器 Notify 立即轮询，
                     // 与 commands.rs save_config 使用同一机制（Notify 已在 lib.rs manage）。
                     if let Some(notify) = app.try_state::<std::sync::Arc<tokio::sync::Notify>>() {
                         notify.notify_one();
                     }
-                    let _ = app.emit("manual-refresh", ());
                 }
                 _ => {}
             }

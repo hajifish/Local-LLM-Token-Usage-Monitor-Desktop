@@ -56,6 +56,12 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_usage,
             get_config,
