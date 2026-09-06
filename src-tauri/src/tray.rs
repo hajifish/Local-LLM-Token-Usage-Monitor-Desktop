@@ -2,7 +2,7 @@ use crate::models::{ProviderStatus, UsageSummary};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    tray::TrayIconBuilder,
     AppHandle, Emitter, Manager,
 };
 
@@ -87,7 +87,7 @@ pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
                 let dx = x - cx;
                 let dy = y - cy;
                 let d2 = dx * dx + dy * dy;
-                let idx = ((y * w as i32 + x) * 4) as usize;
+                let idx = (y * w as i32 * 4 + x * 4) as usize;
                 if idx + 3 >= rgba.len() {
                     continue;
                 }
@@ -111,15 +111,24 @@ pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
 }
 
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
+    let open_item = MenuItem::with_id(app, "open-main-window", "打开主页面", true, None::<&str>)?;
     let refresh_item = MenuItem::with_id(app, "refresh", "刷新数据", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "设置...", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
+    let separator2 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
-    // 初始的占位菜单，scheduler 会动态替换为带详情子菜单的版本
+    // 初始菜单：打开主页面 在顶部，scheduler 会动态替换为带详情版本的完整菜单
     let menu = Menu::with_items(
         app,
-        &[&refresh_item, &separator, &settings_item, &quit_item],
+        &[
+            &open_item,
+            &separator2,
+            &refresh_item,
+            &separator,
+            &settings_item,
+            &quit_item,
+        ],
     )?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
@@ -129,14 +138,20 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .expect("failed to get resource dir")
         .join("icons")
         .join("tray-icon@2x.png");
+    let fallback = || {
+        app.default_window_icon().cloned().unwrap_or_else(|| {
+            log::error!("No default window icon available");
+            panic!("No tray icon could be loaded")
+        })
+    };
     let tray_icon = if icon_path.exists() {
-        Image::from_path(&icon_path).unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
+        Image::from_path(&icon_path).unwrap_or_else(|_| fallback())
     } else {
         // dev 模式下从项目目录加载
         let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("icons")
             .join("tray-icon@2x.png");
-        Image::from_path(&dev_path).unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
+        Image::from_path(&dev_path).unwrap_or_else(|_| fallback())
     };
 
     TrayIconBuilder::with_id("main_tray")
@@ -144,21 +159,18 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon_as_template(false) // 全彩图标，不启用模板模式
         .menu(&menu)
         .tooltip("LLM Token Monitor")
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                ..
-            } = event
-            {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
+        .on_tray_icon_event(|_tray, _event| {
+            // 左键点击只显示菜单（Tauri 默认行为），不打开主窗口。
+            // 用户需通过菜单中的「打开主页面」项手动打开窗口。
         })
         .on_menu_event(|app, event| {
             match event.id().as_ref() {
+                "open-main-window" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
                 "quit" => app.exit(0),
                 "settings" => {
                     if let Some(window) = app.get_webview_window("main") {
@@ -168,12 +180,11 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
                 "refresh" => {
-                    // manual-refresh 前端无监听者（既有空操作）；直接触发调度器 Notify 立即轮询，
+                    // 直接触发调度器 Notify 立即轮询，
                     // 与 commands.rs save_config 使用同一机制（Notify 已在 lib.rs manage）。
                     if let Some(notify) = app.try_state::<std::sync::Arc<tokio::sync::Notify>>() {
                         notify.notify_one();
                     }
-                    let _ = app.emit("manual-refresh", ());
                 }
                 _ => {}
             }

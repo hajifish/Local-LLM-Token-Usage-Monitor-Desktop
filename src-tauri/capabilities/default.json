@@ -7,7 +7,6 @@
     "core:default",
     "core:event:allow-emit",
     "core:event:allow-listen",
-    "log:default",
-    "opener:default"
+    "log:default"
   ]
 }

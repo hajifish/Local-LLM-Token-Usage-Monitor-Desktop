@@ -34,7 +34,7 @@ impl KimiProvider {
 #[async_trait]
 impl LlmProvider for KimiProvider {
     fn name(&self) -> &str {
-        "Kimi"
+        "Kimi API"
     }
 
     async fn fetch_balance(&self) -> Result<BalanceData, ProviderError> {
@@ -42,7 +42,7 @@ impl LlmProvider for KimiProvider {
             self.client
                 .get("https://api.moonshot.cn/v1/users/me/balance")
                 .header("Authorization", format!("Bearer {}", self.api_key)),
-            "Kimi",
+            "Kimi API",
         )
         .await?;
         if data.code != 0 {
@@ -50,7 +50,7 @@ impl LlmProvider for KimiProvider {
         }
 
         Ok(BalanceData {
-            provider: "Kimi".to_string(),
+            provider: "Kimi API".to_string(),
             available_balance: data.data.available_balance,
             voucher_balance: data.data.voucher_balance,
             cash_balance: data.data.cash_balance,

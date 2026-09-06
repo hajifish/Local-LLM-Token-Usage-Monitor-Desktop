@@ -55,6 +55,12 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Check frontend formatting
+        run: npm run format:check
+
+      - name: Lint frontend
+        run: npm run lint
+
       - name: Check formatting
         working-directory: src-tauri
         run: cargo fmt --check
@@ -72,12 +78,8 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            arch: arm64
-            target: aarch64-apple-darwin
             bundle-path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           - os: windows-latest
-            arch: x64
-            target: x86_64-pc-windows-msvc
             bundle-path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
 
     runs-on: ${{ matrix.os }}
@@ -94,8 +96,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable (pinned 2026-09-03)
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -104,8 +104,6 @@ jobs:
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

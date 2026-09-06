@@ -57,7 +57,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             providers: Vec::new(),
-            refresh_interval: 300,
+            refresh_interval: 60,
         }
     }
 }

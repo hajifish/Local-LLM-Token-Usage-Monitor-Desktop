@@ -1,12 +1,15 @@
-import type { ProviderStatus, QuotaInfo, UsageSummary } from "../hooks/useUsage";
+import type { ProviderStatus, QuotaInfo, UsageSummary } from '../hooks/useUsage';
 
 // Official brand logos downloaded from provider websites (stored in public/providers/)
 const BRAND_LOGOS: Record<string, string> = {
-  DeepSeek: "/providers/deepseek.png",
-  Zhipu: "/providers/zhipu.png",
-  Kimi: "/providers/kimi.png",
-  OpenAI: "/providers/openai.png",
-  Anthropic: "/providers/anthropic.png",
+  DeepSeek: '/providers/deepseek.png',
+  Zhipu: '/providers/zhipu.png',
+  'Kimi API': '/providers/kimi.png',
+  OpenAI: '/providers/openai.png',
+  Anthropic: '/providers/anthropic.png',
+  Codex: '/providers/openai.png',
+  'Claude Code': '/providers/anthropic.png',
+  'Kimi Code': '/providers/kimi.png',
 };
 
 function BrandLogo({ name }: { name: string }) {
@@ -19,7 +22,15 @@ function BrandLogo({ name }: { name: string }) {
   return <span className="brand-logo">{initial}</span>;
 }
 
-function CardHead({ name, alias, badge }: { name: string; alias: string; badge?: { text: string; cls: string } }) {
+function CardHead({
+  name,
+  alias,
+  badge,
+}: {
+  name: string;
+  alias: string;
+  badge?: { text: string; cls: string };
+}) {
   return (
     <div className="p-card-head">
       <span className="p-card-brand">
@@ -35,9 +46,9 @@ function CardHead({ name, alias, badge }: { name: string; alias: string; badge?:
 function warningLevel(p: ProviderStatus): number {
   if (!p.balance) return 0;
   const v = p.balance.available_balance;
-  if (p.balance.currency === "USD") return 0;
+  if (p.balance.currency === 'USD') return 0;
   if (v <= 0) return 2;
-  if (p.balance.currency === "%") return v < 5 ? 1 : 0;
+  if (p.balance.currency === '%') return v < 5 ? 1 : 0;
   return v < 10 ? 1 : 0;
 }
 
@@ -45,7 +56,7 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
   if (!p.enabled) {
     return (
       <div className="p-card p-card-disabled">
-        <CardHead name={p.name} alias={p.alias} badge={{ text: "已禁用", cls: "gray" }} />
+        <CardHead name={p.name} alias={p.alias} badge={{ text: '已禁用', cls: 'gray' }} />
       </div>
     );
   }
@@ -53,20 +64,20 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
   if (p.error) {
     return (
       <div className="p-card p-card-error">
-        <CardHead name={p.name} alias={p.alias} badge={{ text: "异常", cls: "red" }} />
+        <CardHead name={p.name} alias={p.alias} badge={{ text: '异常', cls: 'red' }} />
         <p className="p-card-error-msg">{p.error}</p>
       </div>
     );
   }
 
   const { balance, usage, quota_infos } = p;
-  const isPercent = balance?.currency === "%";
-  const isUsd = balance?.currency === "USD";
+  const isPercent = balance?.currency === '%';
+  const isUsd = balance?.currency === 'USD';
   // For percent-based providers (e.g. Zhipu), prefix the label with the primary quota name
   const primaryQuotaName =
     isPercent && quota_infos && quota_infos.length > 0 ? quota_infos[0].name : null;
   const warn = warningLevel(p);
-  const warnClass = warn === 2 ? "p-card-warn-red" : warn === 1 ? "p-card-warn-yellow" : "";
+  const warnClass = warn === 2 ? 'p-card-warn-red' : warn === 1 ? 'p-card-warn-yellow' : '';
 
   return (
     <div className={`p-card ${warnClass}`.trim()}>
@@ -76,7 +87,7 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
       {/* Main display: big number */}
       {balance && (
         <div className="p-card-main">
-          <span className={`p-card-big ${isUsd ? "accent-blue" : "accent-green"}`}>
+          <span className={`p-card-big ${isUsd ? 'accent-blue' : 'accent-green'}`}>
             {isPercent
               ? `${balance.available_balance.toFixed(0)}%`
               : isUsd
@@ -85,10 +96,10 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
           </span>
           <span className="p-card-label">
             {isPercent
-              ? `${primaryQuotaName ? primaryQuotaName + " " : ""}配额剩余`
+              ? `${primaryQuotaName ? primaryQuotaName + ' ' : ''}配额剩余`
               : isUsd
-                ? "本月已花费"
-                : "剩余余额"}
+                ? '本月已花费'
+                : '剩余余额'}
           </span>
         </div>
       )}
@@ -126,18 +137,19 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
         )}
 
         {/* Quota infos */}
-        {quota_infos && quota_infos.map((q: QuotaInfo) => (
-          <div className="p-card-detail-row" key={q.name}>
-            <span className="detail-key">
-              {q.plan_label && <span className="quota-plan-tag">{q.plan_label}</span>}
-              {q.name}
-            </span>
-            <span className="detail-val">
-              {q.remaining_percent.toFixed(0)}%
-              {q.reset_time && <span className="reset-hint">{q.reset_time}</span>}
-            </span>
-          </div>
-        ))}
+        {quota_infos &&
+          quota_infos.map((q: QuotaInfo) => (
+            <div className="p-card-detail-row" key={q.name}>
+              <span className="detail-key">
+                {q.plan_label && <span className="quota-plan-tag">{q.plan_label}</span>}
+                {q.name}
+              </span>
+              <span className="detail-val">
+                {q.remaining_percent.toFixed(0)}%
+                {q.reset_time && <span className="reset-hint">{q.reset_time}</span>}
+              </span>
+            </div>
+          ))}
       </div>
     </div>
   );
@@ -166,7 +178,9 @@ function UsagePanel({ summary, loading, error, refresh }: UsagePanelProps) {
         <div className="empty-icon">!</div>
         <p className="empty-title">获取数据失败</p>
         <p className="empty-hint">{error}</p>
-        <button className="action-btn" onClick={refresh}>重试</button>
+        <button className="action-btn" onClick={refresh}>
+          重试
+        </button>
       </div>
     );
   }

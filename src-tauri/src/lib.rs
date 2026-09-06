@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
-use commands::{get_config, get_config_health, get_usage, save_config};
+use commands::{get_config, get_config_health, get_usage, save_config, trigger_refresh};
 use models::UsageSummary;
 use scheduler::Scheduler;
 use tauri_plugin_log::{Target, TargetKind};
@@ -56,11 +56,18 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_usage,
             get_config,
             get_config_health,
-            save_config
+            save_config,
+            trigger_refresh
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

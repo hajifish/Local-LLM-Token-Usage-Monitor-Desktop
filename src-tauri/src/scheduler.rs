@@ -72,7 +72,11 @@ async fn poll_providers(
     last_summary: &Arc<RwLock<UsageSummary>>,
 ) {
     log::info!("Starting provider data refresh");
-    let cfg = config.read().await;
+    let cfg = {
+        let c = config.read().await;
+        c.clone()
+    };
+    // 读锁已释放，后续网络请求不持锁
     let mut provider_statuses = Vec::new();
     let mut total_balance = 0.0;
 
@@ -83,7 +87,12 @@ async fn poll_providers(
             .filter(|a| !a.trim().is_empty())
             .unwrap_or_else(|| provider_cfg.name.clone());
 
-        if !provider_cfg.enabled || provider_cfg.api_key.is_empty() {
+        // Codex / Claude Code / Kimi Code 无需 API Key（凭证从 CLI 配置文件读取），跳过空 key 检查
+        let needs_api_key = !matches!(
+            provider_cfg.name.as_str(),
+            "Codex" | "Claude Code" | "Kimi Code"
+        );
+        if !provider_cfg.enabled || (needs_api_key && provider_cfg.api_key.is_empty()) {
             provider_statuses.push(ProviderStatus {
                 name: provider_cfg.name.clone(),
                 alias: display_alias,
@@ -199,6 +208,22 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 否则会装上缺少“退出”的菜单（ActivationPolicy::Accessory 下托盘退出是唯一出口）。
         let mut critical_ok = true;
 
+        // 0) 打开主页面（顶部第一项）
+        let Ok(open_item) = MenuItem::with_id(
+            app_handle,
+            "open-main-window",
+            "打开主页面",
+            true,
+            None::<&str>,
+        ) else {
+            return;
+        };
+        critical_ok &= menu.append(&open_item).is_ok();
+        let Ok(separator_open) = PredefinedMenuItem::separator(app_handle) else {
+            return;
+        };
+        critical_ok &= menu.append(&separator_open).is_ok();
+
         // 1) 刷新数据
         let Ok(refresh_item) =
             MenuItem::with_id(app_handle, "refresh", "刷新数据", true, None::<&str>)
@@ -284,4 +309,5 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             let _ = tray.set_menu(Some(menu));
         }
     }
+    let _ = app_handle;
 }

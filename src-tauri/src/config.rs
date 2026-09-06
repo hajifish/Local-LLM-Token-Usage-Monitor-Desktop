@@ -649,7 +649,7 @@ mod tests {
 
         let (loaded, health) = load_from_path(&path);
         assert!(loaded.providers.is_empty());
-        assert_eq!(loaded.refresh_interval, 300);
+        assert_eq!(loaded.refresh_interval, 60);
         assert!(health.unreadable, "解密失败必须标记 unreadable");
         assert!(health.backup_path.is_none(), "load 路径不应产生备份");
         // 文件逐字未变

@@ -25,9 +25,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
         <div style={{ padding: '20px', textAlign: 'center' }}>
           <h2>应用出错了</h2>
           <p>{this.state.error?.message}</p>
-          <button onClick={() => this.setState({ hasError: false, error: null })}>
-            重试
-          </button>
+          <button onClick={() => this.setState({ hasError: false, error: null })}>重试</button>
         </div>
       );
     }
