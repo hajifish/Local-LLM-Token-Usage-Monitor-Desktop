@@ -1,4 +1,4 @@
-use crate::models::{AppConfig, ProviderStatus, UsageSummary};
+use crate::models::{AppConfig, BalanceData, ProviderStatus, UsageSummary};
 use crate::providers;
 use std::sync::Arc;
 use tauri::{
@@ -7,6 +7,53 @@ use tauri::{
 };
 use tokio::sync::{Notify, RwLock};
 use tokio::time::Duration;
+
+/// 生成 Unicode 进度条，如 [████████░░]
+fn progress_bar(percent: f64, width: usize) -> String {
+    let filled = (percent / 100.0 * width as f64).round() as usize;
+    let filled = filled.min(width);
+    let empty = width.saturating_sub(filled);
+    format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+}
+
+/// 根据告警级别返回状态点 emoji
+fn status_dot(level: u8) -> &'static str {
+    match level {
+        2 => "🔴",
+        1 => "🟡",
+        _ => "🟢",
+    }
+}
+
+/// 从 BalanceData 计算已用百分比（仅百分比类型有意义）
+fn used_percent(b: &BalanceData) -> f64 {
+    if b.is_percent() {
+        (100.0 - b.available_balance).max(0.0).min(100.0)
+    } else {
+        0.0
+    }
+}
+
+/// 格式化单个供应商为紧凑单行文本
+fn format_provider_line(p: &ProviderStatus) -> String {
+    let dot = status_dot(crate::tray::provider_warning_level(p));
+    if let Some(ref balance) = p.balance {
+        if balance.is_percent() {
+            let remaining = balance.available_balance;
+            let used = used_percent(balance);
+            let bar = progress_bar(used, 10);
+            format!("{} {}  {:.0}%  {}  剩余 {:.0}%", dot, p.alias, used, bar, remaining)
+        } else if balance.is_usd() {
+            format!("{} {}  ${:.2}  本月花费", dot, p.alias, balance.available_balance)
+        } else {
+            format!("{} {}  ¥{:.2}  可用", dot, p.alias, balance.available_balance)
+        }
+    } else if p.error.is_some() {
+        format!("{} {}  获取失败", dot, p.alias)
+    } else {
+        format!("{} {}  无数据", dot, p.alias)
+    }
+}
 
 pub struct Scheduler {
     app_handle: AppHandle,
@@ -205,38 +252,10 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         };
 
         // 关键项（refresh/settings/quit）append 必须全部成功才装配菜单，
-        // 否则会装上缺少“退出”的菜单（ActivationPolicy::Accessory 下托盘退出是唯一出口）。
+        // 否则会装上缺少"退出"的菜单（ActivationPolicy::Accessory 下托盘退出是唯一出口）。
         let mut critical_ok = true;
-
-        // 0) 打开主页面（顶部第一项）
-        let Ok(open_item) = MenuItem::with_id(
-            app_handle,
-            "open-main-window",
-            "打开主页面",
-            true,
-            None::<&str>,
-        ) else {
-            return;
-        };
-        critical_ok &= menu.append(&open_item).is_ok();
-        let Ok(separator_open) = PredefinedMenuItem::separator(app_handle) else {
-            return;
-        };
-        critical_ok &= menu.append(&separator_open).is_ok();
-
-        // 1) 刷新数据
-        let Ok(refresh_item) =
-            MenuItem::with_id(app_handle, "refresh", "刷新数据", true, None::<&str>)
-        else {
-            return;
-        };
-        critical_ok &= menu.append(&refresh_item).is_ok();
-        let Ok(separator_top) = PredefinedMenuItem::separator(app_handle) else {
-            return;
-        };
-        critical_ok &= menu.append(&separator_top).is_ok();
-
-        // 2) 供应商状态条目（disabled，不可点击），上限 50 条；id 加序号防别名重复冲突
+        
+        // 1) 供应商状态条目（disabled，不可点击），上限 50 条；id 加序号防别名重复冲突
         const MAX_PROVIDER_ITEMS: usize = 50;
         for (i, p) in summary
             .providers
@@ -244,19 +263,7 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             .take(MAX_PROVIDER_ITEMS)
             .enumerate()
         {
-            let text = if let Some(ref balance) = p.balance {
-                if balance.is_percent() {
-                    format!("{}: 剩余 {:.0}%", p.alias, balance.available_balance)
-                } else if balance.is_usd() {
-                    format!("{}: 本月 ${:.2}", p.alias, balance.available_balance)
-                } else {
-                    format!("{}: ¥{:.2}", p.alias, balance.available_balance)
-                }
-            } else if p.error.is_some() {
-                format!("{}: 获取失败", p.alias)
-            } else {
-                format!("{}: 无数据", p.alias)
-            };
+            let text = format_provider_line(p);
             if let Ok(item) = MenuItem::with_id(
                 app_handle,
                 format!("detail_{}_{}", i, p.alias),
@@ -267,8 +274,8 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 let _ = menu.append(&item); // 供应商展示项失败可忽略
             }
         }
-
-        // 3) 超过上限则追加截断提示
+        
+        // 2) 超过上限则追加截断提示
         if summary.providers.len() > MAX_PROVIDER_ITEMS {
             let text = format!("…共 {} 个供应商", summary.providers.len());
             if let Ok(item) =
@@ -277,8 +284,8 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 let _ = menu.append(&item);
             }
         }
-
-        // 4) 没有任何服务商时放一个占位项
+        
+        // 3) 没有任何服务商时放一个占位项
         if summary.providers.is_empty() {
             if let Ok(item) =
                 MenuItem::with_id(app_handle, "no_provider", "暂无服务商", false, None::<&str>)
@@ -286,19 +293,56 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 let _ = menu.append(&item);
             }
         }
-
-        // 5) 设置 / 退出
-        let Ok(separator_bottom) = PredefinedMenuItem::separator(app_handle) else {
+        
+        // 4) 更新于 HH:MM（disabled 展示项，紧跟供应商状态）
+        let update_time = summary
+            .last_updated
+            .split(' ')
+            .nth(1)
+            .and_then(|t| t.rsplit_once(':'))
+            .map(|(h, m)| format!("{}:{}", h, m))
+            .unwrap_or_else(|| summary.last_updated.clone());
+        if let Ok(time_item) = MenuItem::with_id(
+            app_handle,
+            "update-time",
+            &format!("更新于 {}", update_time),
+            false,
+            None::<&str>,
+        ) {
+            let _ = menu.append(&time_item);
+        }
+        
+        // 5) 分隔线 → 打开主页
+        let Ok(separator1) = PredefinedMenuItem::separator(app_handle) else {
             return;
         };
-        critical_ok &= menu.append(&separator_bottom).is_ok();
+        critical_ok &= menu.append(&separator1).is_ok();
+        
+        let Ok(open_item) = MenuItem::with_id(
+            app_handle,
+            "open-main-window",
+            "打开主页",
+            true,
+            None::<&str>,
+        ) else {
+            return;
+        };
+        critical_ok &= menu.append(&open_item).is_ok();
+        
+        // 6) 分隔线 → 设置 + 退出（同一分隔区）
+        let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
+            return;
+        };
+        critical_ok &= menu.append(&separator2).is_ok();
+        
         let Ok(settings_item) =
-            MenuItem::with_id(app_handle, "settings", "设置...", true, None::<&str>)
+            MenuItem::with_id(app_handle, "settings", "⚙ 设置", true, None::<&str>)
         else {
             return;
         };
         critical_ok &= menu.append(&settings_item).is_ok();
-        let Ok(quit_item) = MenuItem::with_id(app_handle, "quit", "退出", true, None::<&str>)
+        
+        let Ok(quit_item) = MenuItem::with_id(app_handle, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)
         else {
             return;
         };
