@@ -6,7 +6,9 @@ A lightweight desktop application for monitoring token usage and balances across
 
 ## Preview
 
-![Preview](assets/screenshot-main.png)
+| Main Panel | Tray Menu |
+|:----------:|:---------:|
+| ![Main Panel](assets/screenshot-main.png) | ![Tray Menu](assets/screenshot-menu.png) |
 
 ## Features
 
@@ -33,11 +35,13 @@ Head to [GitHub Releases](https://github.com/hajifish/Local-LLM-Token-Usage-Moni
 
 ### macOS "App is Damaged" Warning on First Launch
 
-Since the app is not signed or notarized by Apple, you may see a "app is damaged" or "cannot verify developer" warning when opening it for the first time. Here's how to resolve it:
+Since the app is not signed or notarized by Apple, macOS will block it from running. Open Terminal and run the following command to remove the restriction:
 
-1. Right-click the app icon and select "Open"
-2. Click "Open" in the dialog that appears
-3. Or go to "System Settings → Privacy & Security" and click "Open Anyway"
+```bash
+xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.app
+```
+
+> If the app is not in `/Applications`, replace it with the actual path.
 
 ## Configuration & Key Security
 

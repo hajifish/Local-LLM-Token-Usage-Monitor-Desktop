@@ -6,7 +6,9 @@
 
 ## 功能预览
 
-![功能预览](assets/screenshot-main.png)
+| 主面板 | 托盘菜单 |
+|:------:|:--------:|
+| ![主面板](assets/screenshot-main.png) | ![托盘菜单](assets/screenshot-menu.png) |
 
 ## 功能特性
 
@@ -33,11 +35,13 @@
 
 ### macOS 首次打开提示「已损坏」
 
-由于应用未经 Apple 签名和公证，首次打开可能提示「应用已损坏」或「无法验证开发者」。解决方法：
+由于应用未经 Apple 签名和公证，macOS 会阻止运行。打开终端执行以下命令即可解除限制：
 
-1. 右键点击应用图标，选择「打开」
-2. 在弹出的对话框中点击「打开」
-3. 或者前往「系统设置 → 隐私与安全性」，点击「仍要打开」
+```bash
+xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.app
+```
+
+> 如果应用不在 `/Applications` 目录，请替换为实际路径。
 
 ## 配置文件与密钥安全
 
