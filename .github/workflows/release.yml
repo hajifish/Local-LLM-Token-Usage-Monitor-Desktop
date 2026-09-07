@@ -46,14 +46,19 @@ jobs:
         shell: bash
         run: |
           RAW=${GITHUB_REF_NAME#v}
-          # Convert date-based tag (e.g. 2026.9.7.4) to semver (0.20260907.4)
+          # Convert tag to semver compatible with Windows MSI (each segment ≤ 255)
+          # v0.1.0 → 0.1.0 (already semver)
+          # v2026.9.7.5 → 0.1.5 (use sequence number as patch)
+          # v2026.9.7 → 0.1.0
           IFS='.' read -ra PARTS <<< "$RAW"
-          if [ ${#PARTS[@]} -ge 4 ]; then
-            SEMVER="0.${PARTS[0]}$(printf '%02d' ${PARTS[1]})$(printf '%02d' ${PARTS[2]}).${PARTS[3]}"
-          elif [ ${#PARTS[@]} -eq 3 ]; then
-            SEMVER="0.${PARTS[0]}$(printf '%02d' ${PARTS[1]})$(printf '%02d' ${PARTS[2]}).0"
-          else
+          if [ ${#PARTS[@]} -eq 3 ] && [ ${PARTS[0]} -le 255 ] 2>/dev/null; then
             SEMVER="$RAW"
+          elif [ ${#PARTS[@]} -ge 4 ]; then
+            SEMVER="0.1.${PARTS[3]}"
+          elif [ ${#PARTS[@]} -eq 3 ]; then
+            SEMVER="0.1.0"
+          else
+            SEMVER="0.1.0"
           fi
           echo "Converting tag '$RAW' to semver '$SEMVER'"
           npm version "$SEMVER" --no-git-tag-version || echo "Version already set to $SEMVER"
