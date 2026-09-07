@@ -15,9 +15,9 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            bundle-path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            bundle-path: src-tauri/target/release/bundle/dmg/*.dmg
           - os: windows-latest
-            bundle-path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            bundle-path: src-tauri/target/release/bundle/msi/*.msi
 
     runs-on: ${{ matrix.os }}
 
