@@ -117,15 +117,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let settings_item = MenuItem::with_id(app, "settings", "⚙ 设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(
-        app,
-        &[
-            &open_item,
-            &separator1,
-            &settings_item,
-            &quit_item,
-        ],
-    )?;
+    let menu = Menu::with_items(app, &[&open_item, &separator1, &settings_item, &quit_item])?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
     let icon_path = app
@@ -164,29 +156,22 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                 notify.notify_one();
             }
         })
-        .on_menu_event(|app, event| {
-            match event.id().as_ref() {
-                "open-main-window" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open-main-window" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
-                "quit" => app.exit(0),
-                "settings" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                        let _ = window.emit("navigate", "settings");
-                    }
-                }
-                "refresh" => {
-                    if let Some(notify) = app.try_state::<std::sync::Arc<tokio::sync::Notify>>() {
-                        notify.notify_one();
-                    }
-                }
-                _ => {}
             }
+            "quit" => app.exit(0),
+            "settings" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.emit("navigate", "settings");
+                }
+            }
+            _ => {}
         })
         .build(app)?;
 

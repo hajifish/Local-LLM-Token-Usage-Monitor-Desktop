@@ -28,7 +28,7 @@ fn status_dot(level: u8) -> &'static str {
 /// 从 BalanceData 计算已用百分比（仅百分比类型有意义）
 fn used_percent(b: &BalanceData) -> f64 {
     if b.is_percent() {
-        (100.0 - b.available_balance).max(0.0).min(100.0)
+        (100.0 - b.available_balance).clamp(0.0, 100.0)
     } else {
         0.0
     }
@@ -42,11 +42,20 @@ fn format_provider_line(p: &ProviderStatus) -> String {
             let remaining = balance.available_balance;
             let used = used_percent(balance);
             let bar = progress_bar(used, 10);
-            format!("{} {}  {:.0}%  {}  剩余 {:.0}%", dot, p.alias, used, bar, remaining)
+            format!(
+                "{} {}  {:.0}%  {}  剩余 {:.0}%",
+                dot, p.alias, used, bar, remaining
+            )
         } else if balance.is_usd() {
-            format!("{} {}  ${:.2}  本月花费", dot, p.alias, balance.available_balance)
+            format!(
+                "{} {}  ${:.2}  本月花费",
+                dot, p.alias, balance.available_balance
+            )
         } else {
-            format!("{} {}  ¥{:.2}  可用", dot, p.alias, balance.available_balance)
+            format!(
+                "{} {}  ¥{:.2}  可用",
+                dot, p.alias, balance.available_balance
+            )
         }
     } else if p.error.is_some() {
         format!("{} {}  获取失败", dot, p.alias)
@@ -254,7 +263,7 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 关键项（refresh/settings/quit）append 必须全部成功才装配菜单，
         // 否则会装上缺少"退出"的菜单（ActivationPolicy::Accessory 下托盘退出是唯一出口）。
         let mut critical_ok = true;
-        
+
         // 1) 供应商状态条目（disabled，不可点击），上限 50 条；id 加序号防别名重复冲突
         const MAX_PROVIDER_ITEMS: usize = 50;
         for (i, p) in summary
@@ -274,7 +283,7 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 let _ = menu.append(&item); // 供应商展示项失败可忽略
             }
         }
-        
+
         // 2) 超过上限则追加截断提示
         if summary.providers.len() > MAX_PROVIDER_ITEMS {
             let text = format!("…共 {} 个供应商", summary.providers.len());
@@ -284,7 +293,7 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 let _ = menu.append(&item);
             }
         }
-        
+
         // 3) 没有任何服务商时放一个占位项
         if summary.providers.is_empty() {
             if let Ok(item) =
@@ -293,7 +302,7 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 let _ = menu.append(&item);
             }
         }
-        
+
         // 4) 更新于 HH:MM（disabled 展示项，紧跟供应商状态）
         let update_time = summary
             .last_updated
@@ -305,19 +314,19 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         if let Ok(time_item) = MenuItem::with_id(
             app_handle,
             "update-time",
-            &format!("更新于 {}", update_time),
+            format!("更新于 {}", update_time),
             false,
             None::<&str>,
         ) {
             let _ = menu.append(&time_item);
         }
-        
+
         // 5) 分隔线 → 打开主页
         let Ok(separator1) = PredefinedMenuItem::separator(app_handle) else {
             return;
         };
         critical_ok &= menu.append(&separator1).is_ok();
-        
+
         let Ok(open_item) = MenuItem::with_id(
             app_handle,
             "open-main-window",
@@ -328,21 +337,22 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             return;
         };
         critical_ok &= menu.append(&open_item).is_ok();
-        
+
         // 6) 分隔线 → 设置 + 退出（同一分隔区）
         let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
             return;
         };
         critical_ok &= menu.append(&separator2).is_ok();
-        
+
         let Ok(settings_item) =
             MenuItem::with_id(app_handle, "settings", "⚙ 设置", true, None::<&str>)
         else {
             return;
         };
         critical_ok &= menu.append(&settings_item).is_ok();
-        
-        let Ok(quit_item) = MenuItem::with_id(app_handle, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)
+
+        let Ok(quit_item) =
+            MenuItem::with_id(app_handle, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)
         else {
             return;
         };
@@ -354,4 +364,169 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         }
     }
     let _ = app_handle;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{BalanceData, ProviderStatus};
+
+    // ---------- progress_bar ----------
+
+    #[test]
+    fn progress_bar_zero_percent() {
+        assert_eq!(progress_bar(0.0, 10), "[░░░░░░░░░░]");
+    }
+
+    #[test]
+    fn progress_bar_hundred_percent() {
+        assert_eq!(progress_bar(100.0, 10), "[██████████]");
+    }
+
+    #[test]
+    fn progress_bar_fifty_percent() {
+        assert_eq!(progress_bar(50.0, 10), "[█████░░░░░]");
+    }
+
+    #[test]
+    fn progress_bar_over_hundred_clamps_to_full() {
+        assert_eq!(progress_bar(150.0, 10), "[██████████]");
+    }
+
+    #[test]
+    fn progress_bar_negative_clamps_to_empty() {
+        assert_eq!(progress_bar(-10.0, 10), "[░░░░░░░░░░]");
+    }
+
+    // ---------- status_dot ----------
+
+    #[test]
+    fn status_dot_level_2_is_red() {
+        assert_eq!(status_dot(2), "🔴");
+    }
+
+    #[test]
+    fn status_dot_level_1_is_yellow() {
+        assert_eq!(status_dot(1), "🟡");
+    }
+
+    #[test]
+    fn status_dot_level_0_is_green() {
+        assert_eq!(status_dot(0), "🟢");
+    }
+
+    // ---------- used_percent ----------
+
+    fn pct_balance(available: f64) -> BalanceData {
+        BalanceData {
+            provider: "test".into(),
+            available_balance: available,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 100.0,
+            currency: "%".into(),
+        }
+    }
+
+    #[test]
+    fn used_percent_normal() {
+        let b = pct_balance(70.0); // 剩余 70% → 已用 30%
+        assert!((used_percent(&b) - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn used_percent_overused_clamps_to_100() {
+        let b = pct_balance(-5.0); // 超额 → clamp 到 100
+        assert!((used_percent(&b) - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn used_percent_full_remaining_zero() {
+        let b = pct_balance(100.0); // 满额 → 已用 0
+        assert!((used_percent(&b) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn used_percent_non_percent_returns_zero() {
+        let b = BalanceData {
+            provider: "test".into(),
+            available_balance: 42.0,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 100.0,
+            currency: "USD".into(),
+        };
+        assert!((used_percent(&b) - 0.0).abs() < 1e-9);
+    }
+
+    // ---------- format_provider_line ----------
+
+    fn make_status(
+        alias: &str,
+        balance: Option<BalanceData>,
+        error: Option<String>,
+    ) -> ProviderStatus {
+        ProviderStatus {
+            name: alias.to_string(),
+            alias: alias.to_string(),
+            enabled: true,
+            balance,
+            usage: None,
+            error,
+            quota_infos: None,
+        }
+    }
+
+    #[test]
+    fn format_percent_provider_contains_bar_and_percent() {
+        let p = make_status("智谱", Some(pct_balance(70.0)), None);
+        let line = format_provider_line(&p);
+        assert!(line.contains("█"), "应包含进度条: {line}");
+        assert!(line.contains("30%"), "应包含已用百分比: {line}");
+        assert!(line.contains("剩余 70%"), "应包含剩余百分比: {line}");
+    }
+
+    #[test]
+    fn format_usd_provider_contains_dollar() {
+        let b = BalanceData {
+            provider: "OpenAI".into(),
+            available_balance: 12.34,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 12.34,
+            currency: "USD".into(),
+        };
+        let p = make_status("OpenAI", Some(b), None);
+        let line = format_provider_line(&p);
+        assert!(line.contains("$12.34"), "应包含 $ 金额: {line}");
+    }
+
+    #[test]
+    fn format_cny_provider_contains_yen() {
+        let b = BalanceData {
+            provider: "DeepSeek".into(),
+            available_balance: 88.88,
+            voucher_balance: 10.0,
+            cash_balance: 78.88,
+            total_balance: 88.88,
+            currency: "CNY".into(),
+        };
+        let p = make_status("DeepSeek", Some(b), None);
+        let line = format_provider_line(&p);
+        assert!(line.contains("¥88.88"), "应包含 ¥ 金额: {line}");
+    }
+
+    #[test]
+    fn format_error_provider_contains_failure() {
+        let p = make_status("Kimi", None, Some("network error".into()));
+        let line = format_provider_line(&p);
+        assert!(line.contains("获取失败"), "应包含获取失败: {line}");
+    }
+
+    #[test]
+    fn format_no_data_provider_contains_no_data() {
+        let p = make_status("Unknown", None, None);
+        let line = format_provider_line(&p);
+        assert!(line.contains("无数据"), "应包含无数据: {line}");
+    }
 }
