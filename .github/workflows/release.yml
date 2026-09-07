@@ -45,11 +45,20 @@ jobs:
       - name: Set version from tag
         shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          echo "Setting version to $VERSION"
-          npm version "$VERSION" --no-git-tag-version || echo "Version already set to $VERSION"
-          sed -i.bak "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml
-          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));c.version='$VERSION';fs.writeFileSync('src-tauri/tauri.conf.json',JSON.stringify(c,null,2)+'\n')"
+          RAW=${GITHUB_REF_NAME#v}
+          # Convert date-based tag (e.g. 2026.9.7.4) to semver (0.20260907.4)
+          IFS='.' read -ra PARTS <<< "$RAW"
+          if [ ${#PARTS[@]} -ge 4 ]; then
+            SEMVER="0.${PARTS[0]}$(printf '%02d' ${PARTS[1]})$(printf '%02d' ${PARTS[2]}).${PARTS[3]}"
+          elif [ ${#PARTS[@]} -eq 3 ]; then
+            SEMVER="0.${PARTS[0]}$(printf '%02d' ${PARTS[1]})$(printf '%02d' ${PARTS[2]}).0"
+          else
+            SEMVER="$RAW"
+          fi
+          echo "Converting tag '$RAW' to semver '$SEMVER'"
+          npm version "$SEMVER" --no-git-tag-version || echo "Version already set to $SEMVER"
+          sed -i.bak "s/^version = .*/version = \"$SEMVER\"/" src-tauri/Cargo.toml
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));c.version='$SEMVER';fs.writeFileSync('src-tauri/tauri.conf.json',JSON.stringify(c,null,2)+'\n')"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5
