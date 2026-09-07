@@ -42,8 +42,24 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Log version
-        run: echo "Building release with version $(node -p "require('./package.json').version")"
+      - name: Set version from tag
+        shell: bash
+        run: |
+          # Extract sequence number from auto-tag for patch version
+          # v2026.9.7.7 → 0.1.7, v0.1.0 → 0.1.0
+          RAW=${GITHUB_REF_NAME#v}
+          IFS='.' read -ra PARTS <<< "$RAW"
+          if [ ${#PARTS[@]} -eq 3 ] && [ ${PARTS[0]} -le 255 ] 2>/dev/null; then
+            NEW_VERSION="$RAW"
+          elif [ ${#PARTS[@]} -ge 4 ]; then
+            NEW_VERSION="0.1.${PARTS[3]}"
+          else
+            NEW_VERSION="0.1.0"
+          fi
+          echo "Setting version to $NEW_VERSION (from tag $RAW)"
+          npm version "$NEW_VERSION" --no-git-tag-version || echo "Version already $NEW_VERSION"
+          sed -i.bak "s/^version = .*/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));c.version='$NEW_VERSION';fs.writeFileSync('src-tauri/tauri.conf.json',JSON.stringify(c,null,2)+'\n')"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5
