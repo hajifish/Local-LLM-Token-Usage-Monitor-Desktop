@@ -111,25 +111,13 @@ pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
 }
 
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open_item = MenuItem::with_id(app, "open-main-window", "打开主页面", true, None::<&str>)?;
-    let refresh_item = MenuItem::with_id(app, "refresh", "刷新数据", true, None::<&str>)?;
-    let settings_item = MenuItem::with_id(app, "settings", "设置...", true, None::<&str>)?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let separator2 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    // 初始菜单：紧凑风格，scheduler 会动态替换为带供应商详情的完整菜单
+    let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
+    let separator1 = PredefinedMenuItem::separator(app)?;
+    let settings_item = MenuItem::with_id(app, "settings", "⚙ 设置", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
-    // 初始菜单：打开主页面 在顶部，scheduler 会动态替换为带详情版本的完整菜单
-    let menu = Menu::with_items(
-        app,
-        &[
-            &open_item,
-            &separator2,
-            &refresh_item,
-            &separator,
-            &settings_item,
-            &quit_item,
-        ],
-    )?;
+    let menu = Menu::with_items(app, &[&open_item, &separator1, &settings_item, &quit_item])?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
     let icon_path = app
@@ -159,35 +147,31 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon_as_template(false) // 全彩图标，不启用模板模式
         .menu(&menu)
         .tooltip("LLM Token Monitor")
-        .on_tray_icon_event(|_tray, _event| {
-            // 左键点击只显示菜单（Tauri 默认行为），不打开主窗口。
-            // 用户需通过菜单中的「打开主页面」项手动打开窗口。
-        })
-        .on_menu_event(|app, event| {
-            match event.id().as_ref() {
-                "open-main-window" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
-                "quit" => app.exit(0),
-                "settings" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                        let _ = window.emit("navigate", "settings");
-                    }
-                }
-                "refresh" => {
-                    // 直接触发调度器 Notify 立即轮询，
-                    // 与 commands.rs save_config 使用同一机制（Notify 已在 lib.rs manage）。
-                    if let Some(notify) = app.try_state::<std::sync::Arc<tokio::sync::Notify>>() {
-                        notify.notify_one();
-                    }
-                }
-                _ => {}
+        .on_tray_icon_event(|tray, _event| {
+            // 每次点击托盘图标时触发后台刷新，数据在下次打开菜单时可见。
+            // macOS 系统行为：点击菜单项后菜单必然关闭，因此刷新由托盘图标点击触发，
+            // 而非菜单项点击，避免用户期望"菜单保持打开看更新"的落差。
+            let app = tray.app_handle();
+            if let Some(notify) = app.try_state::<std::sync::Arc<tokio::sync::Notify>>() {
+                notify.notify_one();
             }
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open-main-window" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            "settings" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.emit("navigate", "settings");
+                }
+            }
+            _ => {}
         })
         .build(app)?;
 
