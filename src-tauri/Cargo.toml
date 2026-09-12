@@ -33,7 +33,7 @@ chacha20poly1305 = "0.11"
 # pure 特性禁用 C/汇编实现，避免引入 cc 依赖与交叉编译敏感点（本应用每次启动仅一次 KDF，吞吐无关）
 blake3 = { version = "1", default-features = false, features = ["std", "pure"] }
 base64 = "0.23"
-tray-icon = "0.21"
+tray-icon = "0.24"
 # 敏感数据（派生密钥、明文配置）离开作用域时清零，减少内存滞留
 zeroize = "1"
 # 用户主目录解析（Codex/Claude Code CLI 凭证路径）
