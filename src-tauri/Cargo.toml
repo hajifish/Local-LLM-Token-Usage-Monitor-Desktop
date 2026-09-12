@@ -37,7 +37,7 @@ tray-icon = "0.21"
 # 敏感数据（派生密钥、明文配置）离开作用域时清零，减少内存滞留
 zeroize = "1"
 # 用户主目录解析（Codex/Claude Code CLI 凭证路径）
-dirs = "6"
+dirs = "7"
 
 # Windows 机器指纹来源：注册表 MachineGuid
 [target.'cfg(target_os = "windows")'.dependencies]
